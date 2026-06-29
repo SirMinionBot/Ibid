@@ -1,0 +1,114 @@
+/*
+ * Hermes Knowledge Graph — dashboard plugin styles.
+ *
+ * All colors reference theme CSS vars so the panel reskins with the
+ * active dashboard theme. No hardcoded palette.
+ *
+ * Prefix: .hermes-kg-
+ */
+
+.hermes-kg {
+  width: 100%;
+  color: var(--text-primary, #e5e7eb);
+}
+
+/* ---- Code/pre reset (theme-immune default) ----
+ * Same trick the kanban plugin uses: reset every <code>/<pre> inside
+ * the plugin container to transparent with !important so themes that
+ * paint global code fills don't leak into our raw-text surfaces.
+ */
+.hermes-kg code,
+.hermes-kg pre {
+  background: transparent !important;
+}
+
+/* ---- Table ---- */
+.hermes-kg-table-wrap {
+  overflow-x: auto;
+  border-radius: 0.5rem;
+}
+
+.hermes-kg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.hermes-kg-table th {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  color: var(--text-secondary, #9ca3af);
+  font-weight: 500;
+  user-select: none;
+  background: var(--bg-base-100, transparent);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.hermes-kg-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  color: var(--text-primary, #e5e7eb);
+  vertical-align: middle;
+}
+
+.hermes-kg-table tbody tr {
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.hermes-kg-table tbody tr:hover {
+  background: var(--bg-card-hover, rgba(255, 255, 255, 0.04));
+}
+
+/* ---- Detail overlay + panel ---- */
+.hermes-kg-detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+  animation: hermes-kg-fade-in 120ms ease;
+}
+
+@keyframes hermes-kg-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.hermes-kg-detail-panel {
+  width: 480px;
+  max-width: 100%;
+  height: 100%;
+  background: var(--bg-base-100, #0a0a0a);
+  border-left: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  padding: 24px;
+  overflow-y: auto;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+  animation: hermes-kg-slide-in 180ms ease;
+}
+
+@keyframes hermes-kg-slide-in {
+  from { transform: translateX(20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.hermes-kg-detail-preview {
+  background: var(--bg-card, rgba(255, 255, 255, 0.04));
+  padding: 12px;
+  border-radius: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  color: var(--text-primary, #e5e7eb);
+}
+
+.hermes-kg-detail-meta {
+  background: var(--bg-card, rgba(255, 255, 255, 0.04));
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
