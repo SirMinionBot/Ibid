@@ -573,14 +573,28 @@ export default function App() {
               >
                 <PluginSlot name="header-left" />
 
-                <Typography
-                  className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem] text-midground uppercase"
-                  style={{ mixBlendMode: "plus-lighter" }}
+                {/* Brand cell. Default renders the i18n `app.brand` text.
+                    Themes that ship a custom brand mark (logo + product
+                    name) can override this element via CSS — the wrapping
+                    div has `id="app-sidebar-brand"` and the inner text
+                    node is `id="app-sidebar-brand-default"`. Hiding the
+                    inner node and injecting the theme's mark via a pseudo
+                    element keeps the change opt-in: themes that don't
+                    touch this selector see the default brand unchanged. */}
+                <div
+                  id="app-sidebar-brand"
+                  className="flex items-center gap-2"
                 >
-                  Hermes
-                  <br />
-                  Agent
-                </Typography>
+                  <Typography
+                    id="app-sidebar-brand-default"
+                    className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem] text-midground uppercase"
+                    style={{ mixBlendMode: "plus-lighter" }}
+                  >
+                    Hermes
+                    <br />
+                    Agent
+                  </Typography>
+                </div>
               </div>
 
               <Button

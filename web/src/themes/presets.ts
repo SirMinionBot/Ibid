@@ -733,6 +733,44 @@ main h3 {
   border: 2px solid rgba(15, 23, 42, 0.4);
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(96, 165, 250, 0.45); }
+
+/* ── 12. Sidebar brand cell — owl mark + 'Ibid' wordmark.
+   App.tsx ships a #app-sidebar-brand wrapper containing
+   #app-sidebar-brand-default ("Hermes / Agent"). This block hides the
+   default text and paints the brand mark via two pseudo-elements on
+   the wrapper so the slot survives without React changes. ── */
+#app-sidebar-brand-default {
+  display: none !important;
+}
+#app-sidebar-brand::before {
+  /* Owl mark — inline SVG from @codigosinsiesta/theme brand assets
+     (src/assets/logo-owl-head.svg). Line-art owl with stroke + fill
+     on currentColor; inlined as a data: URI + masked with
+     background-color so we can recolor it via CSS. */
+  content: '' !important;
+  display: inline-block !important;
+  width: 30px !important;
+  height: 30px !important;
+  margin-right: 10px !important;
+  flex-shrink: 0 !important;
+  background-color: #60a5fa !important;
+  -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 14 L20 22"/><path d="M48 14 L44 22"/><path d="M10 30 C 10 18, 22 10, 32 10 C 42 10, 54 18, 54 30 C 54 42, 44 52, 32 52 C 20 52, 10 42, 10 30 Z"/><circle cx="22" cy="30" r="7"/><circle cx="42" cy="30" r="7"/><circle cx="22" cy="30" r="1.8" fill="black"/><circle cx="42" cy="30" r="1.8" fill="black"/><path d="M32 36 L29 41 L32 44 L35 41 Z"/></svg>') no-repeat center / contain !important;
+          mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 14 L20 22"/><path d="M48 14 L44 22"/><path d="M10 30 C 10 18, 22 10, 32 10 C 42 10, 54 18, 54 30 C 54 42, 44 52, 32 52 C 20 52, 10 42, 10 30 Z"/><circle cx="22" cy="30" r="7"/><circle cx="42" cy="30" r="7"/><circle cx="22" cy="30" r="1.8" fill="black"/><circle cx="42" cy="30" r="1.8" fill="black"/><path d="M32 36 L29 41 L32 44 L35 41 Z"/></svg>') no-repeat center / contain !important;
+}
+#app-sidebar-brand::after {
+  /* Brand text — 'Ibid' alone, weight 800 in Space Grotesk. The fork
+     is the product; the theme provenance stays implicit (theme name
+     is shown in the theme switcher, not in the sidebar chrome). */
+  content: 'Ibid' !important;
+  font-family: 'Space Grotesk', 'Inter', sans-serif !important;
+  font-weight: 800 !important;
+  font-size: 15px !important;
+  line-height: 1 !important;
+  letter-spacing: 0.02em !important;
+  color: #f1f5f9 !important;
+  text-transform: none !important;
+  display: inline-block !important;
+}
 `,
 };
 
