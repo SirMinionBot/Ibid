@@ -883,6 +883,17 @@ async def post_reindex(source: Optional[str] = Query(None)) -> Dict[str, str]:
     else:
         targets = list(SOURCE_IDS)
 
+    # Insert the parent job row up front so the client can poll it.
+    try:
+        with _get_conn(_db_path()) as conn:
+            conn.execute(
+                "INSERT INTO jobs(job_id, source, status, progress, started_at, message) "
+                "VALUES (?, ?, 'running', 0.0, ?, ?)",
+                (job_id, ",".join(targets), _now_iso(), "started"),
+            )
+    except Exception as exc:
+        _log.warning("could not insert parent job row: %s", exc)
+
     asyncio.create_task(_run_indexer(job_id, targets))
     return {"job_id": job_id}
 
@@ -910,6 +921,16 @@ async def _run_indexer(job_id: str, sources: List[str]) -> None:
                     )
             except Exception:
                 pass
+
+    # Mark the parent job as done once all source jobs have finished.
+    try:
+        with _get_conn(db) as conn:
+            conn.execute(
+                "UPDATE jobs SET status='done', progress=1.0, ended_at=? WHERE job_id=?",
+                (_now_iso(), job_id),
+            )
+    except Exception as exc:
+        _log.warning("could not finalise parent job %s: %s", job_id, exc)
 
 
 # -----------------------------------------------------------------------------
