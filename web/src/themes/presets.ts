@@ -769,10 +769,10 @@ main h3 {
   filter: drop-shadow(0 0 6px rgba(96, 165, 250, 0.45)) !important;
 }
 #app-sidebar-brand::after {
-  /* Brand text — 'Ibid' alone, weight 800 in Space Grotesk. The fork
-     is the product; the theme provenance stays implicit (theme name
-     is shown in the theme switcher, not in the sidebar chrome). */
-  content: 'Ibid' !important;
+  /* Brand text — 'IBID CSS' in Space Grotesk 800, treated as a single
+     product wordmark (the CSS theme is the fork's flagship, so the
+     abbreviation lives next to the brand mark). */
+  content: 'IBID CSS' !important;
   font-family: 'Space Grotesk', 'Inter', sans-serif !important;
   font-weight: 800 !important;
   font-size: 15px !important;
