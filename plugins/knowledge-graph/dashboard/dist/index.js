@@ -70,6 +70,13 @@
     const incoming = edges.filter(function (e) { return e.target === node.id; });
     const outgoing = edges.filter(function (e) { return e.source === node.id; });
 
+    // Close on Escape
+    useEffect(function () {
+      function onKey(e) { if (e.key === "Escape") onClose(); }
+      window.addEventListener("keydown", onKey);
+      return function () { window.removeEventListener("keydown", onKey); };
+    }, [onClose]);
+
     return h("div", { className: "hermes-kg-detail-overlay", onClick: onClose },
       h("div", { className: "hermes-kg-detail-panel", onClick: function (e) { e.stopPropagation(); } },
         h("div", { className: "flex items-start justify-between mb-4 gap-2" },
