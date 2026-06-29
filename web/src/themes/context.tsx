@@ -410,6 +410,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   /** Name of the currently active theme (built-in id or user YAML name). */
   const [themeName, setThemeName] = useState<string>(() => {
     if (typeof window === "undefined") return "default";
+    // Priority order: ?theme=<name> query param > localStorage > "default".
+    // The query-param escape hatch lets reviewers preview a theme without
+    // having to authenticate first (otherwise the dashboard falls back to
+    // localStorage "default" on the first paint when the /api/dashboard/
+    // themes endpoint returns 401). Validates against BUILTIN_THEMES so
+    // a typo in the URL can't poison the state.
+    try {
+      const urlTheme = new URLSearchParams(window.location.search).get("theme");
+      if (urlTheme && urlTheme in BUILTIN_THEMES) {
+        return urlTheme;
+      }
+    } catch {
+      // Malformed URL — fall through to localStorage.
+    }
     const stored = window.localStorage.getItem(STORAGE_KEY) ?? "default";
     const migrated = migrateThemeName(stored);
     // Write the migrated name back so future reads converge on the new

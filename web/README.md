@@ -27,6 +27,17 @@ Open the **Vite URL** printed in the terminal (usually `http://localhost:5173`).
 
 The Vite dev server proxies `/api` requests to `http://127.0.0.1:9119` (the FastAPI backend).
 
+## Theme preview via URL
+
+Append `?theme=<name>` to preview a built-in theme without touching localStorage or authenticating. Useful for reviewers and for sharing screenshots:
+
+```
+http://localhost:5173/?theme=codigo-sin-siesta
+http://localhost:5173/?theme=nous-blue
+```
+
+Validates against `BUILTIN_THEMES` — unknown names fall through to localStorage. The query string wins on first paint; once you switch via the picker, normal localStorage behaviour resumes.
+
 ## Build
 
 ```bash
