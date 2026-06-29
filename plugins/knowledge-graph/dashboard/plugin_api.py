@@ -858,7 +858,7 @@ def search(
     except Exception as exc:
         _log.warning("search failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
-    return {"results": [n.model_dump() for n in results], "total": total}
+    return {"results": results, "total": total}
 
 
 # -----------------------------------------------------------------------------
