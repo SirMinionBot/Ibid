@@ -227,7 +227,7 @@
 
     function openNodeDetail(id) {
       SDK.fetchJSON(API + "/node/" + encodeURIComponent(id))
-        .then(setSelectedNode)
+        .then(function (resp) { setSelectedNode(resp.node || resp); })
         .catch(function (e) { setError(String(e && e.message ? e.message : e)); });
     }
 
