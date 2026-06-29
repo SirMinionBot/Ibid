@@ -103,7 +103,15 @@ import { api } from "@/lib/api";
 import type { StatusResponse } from "@/lib/api";
 
 function RootRedirect() {
-  return <Navigate to="/sessions" replace />;
+  // Preserve query string on the root → /sessions redirect. Without this,
+  // deep-link previews like `/?theme=<name>` lose their params before the
+  // React tree mounts and the ThemeProvider can't pick them up. The same
+  // fix applies to any future escape-hatch query params (deep-links to a
+  // specific session, pre-filtered analytics, etc.) so it's worth doing
+  // once at the redirect boundary rather than papering over the symptom
+  // inside each consumer.
+  const search = typeof window !== "undefined" ? window.location.search : "";
+  return <Navigate to={`/sessions${search}`} replace />;
 }
 
 function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {

@@ -495,7 +495,21 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         }
         if (resp.active) {
           const migratedActive = migrateThemeName(resp.active);
-          if (migratedActive !== themeName) {
+          // Don't clobber an explicit user override on first paint. Three
+          // signals count as explicit: `?theme=` in the URL, a non-default
+          // localStorage value, OR an in-flight setTheme (the previous
+          // themeName). Without this guard, unauthenticated reviewers
+          // previewing a theme via a deep-link `?theme=<name>` would see
+          // the server's default (Hermes Teal) the moment /api/dashboard/
+          // themes replied, because the backend returns active="default"
+          // until the user actually persists a theme via the picker.
+          const urlHasTheme =
+            new URLSearchParams(window.location.search).get("theme") !== null;
+          const storedOverride = window.localStorage.getItem(STORAGE_KEY);
+          const hasUserOverride =
+            urlHasTheme ||
+            (storedOverride !== null && storedOverride !== "default");
+          if (migratedActive !== themeName && !hasUserOverride) {
             setThemeName(migratedActive);
             window.localStorage.setItem(STORAGE_KEY, migratedActive);
           }
