@@ -300,23 +300,34 @@ export const defaultLargeTheme: DashboardTheme = {
 };
 
 /**
- * Código Sin Siesta — port of the @codigosinsiesta/theme v0.7.0 "dark
- * blueprint" tokens onto the dashboard palette triplet.
+ * Código Sin Siesta — full port of the @codigosinsiesta/theme v0.7.0
+ * "dark blueprint" design system onto the dashboard, including the
+ * chrome elements (top accent bar, breadcrumb, footer, eyebrow bars,
+ * pulse-dots, floating orb) that are baked into `chrome.css` for the
+ * deck slides. Without them the theme reads as "generic dark mode with
+ * a cobalto tint" rather than the CSS look — this preset rebuilds that
+ * visual signature on top of the dashboard shell.
  *
- * Source of truth: https://github.com/CodigoSinSiesta/theme
+ * Token map (source → dashboard):
  *   --color-fondo    → background (slate-900 canvas)
  *   --color-tinta    → midground (slate-100 primary text)
  *   --color-cielo    → warm-glow tint (sky-400)
- *   --font-display   → Space Grotesk (themed chrome)
+ *   --font-display   → Space Grotesk (chrome, h1)
  *   --font-body      → Inter (body)
  *   --font-mono      → JetBrains Mono (technical)
- *   --radius-md      → 1rem corner radius
+ *   --radius-md      → 1.25rem corner radius (CSS Theme goes up to 1.5)
+ *
+ * What lives in customCSS (raw CSS injected via the theme's customCSS
+ * slot, scoped to the dashboard shell):
+ *   - .csi-accent-bar: 3px gradient top bar (cobalto → eléctrico → cielo)
+ *   - .csi-breadcrumb / .csi-footer: mono breadcrumb + footer chrome
+ *   - .csi-eyebrow: 24×2px bar + uppercase mono for h2/h3
+ *   - .csi-pulse-dot: 2s pulse for status indicators
+ *   - .csi-float-orb: slow floating radial gradient behind the canvas
  *
  * We do NOT touch index.css or any component — this is a pure preset
- * addition so users can pick the CSS look from the ThemeSwitcher. The
- * existing shadcn-compat cascade in index.css already derives every
- * card / muted / border token from background+midground via color-mix(),
- * so injecting the CSS palette triplet propagates automatically.
+ * addition. Glassmorphism on cards lives in `componentStyles.card` so it
+ * reacts to the existing `.card` selector without component edits.
  */
 export const codigoSinSiestaTheme: DashboardTheme = {
   name: "codigo-sin-siesta",
@@ -327,8 +338,10 @@ export const codigoSinSiestaTheme: DashboardTheme = {
     background: { hex: "#0f172a", alpha: 1 }, // --color-fondo (slate-900)
     midground: { hex: "#f1f5f9", alpha: 1 }, // --color-tinta (slate-100)
     foreground: { hex: "#ffffff", alpha: 0 },
-    warmGlow: "rgba(96, 165, 250, 0.28)", // --color-cielo (sky-400) @ 0.28
-    noiseOpacity: 0.85,
+    // --color-cielo (sky-400) bumped from 0.28 → 0.45 so the blueprint
+    // glow reads at the edges without competing with the accent bar.
+    warmGlow: "rgba(96, 165, 250, 0.45)",
+    noiseOpacity: 0.95,
   },
   typography: {
     ...DEFAULT_TYPOGRAPHY,
@@ -336,32 +349,391 @@ export const codigoSinSiestaTheme: DashboardTheme = {
     fontDisplay: `"Space Grotesk", "Inter", ${SYSTEM_SANS}`,
     fontMono: `"JetBrains Mono", ${SYSTEM_MONO}`,
     fontUrl:
-      "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap",
-    baseSize: "15px",
+      "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap",
+    // Bumped 15 → 16px so body copy breathes like the deck slides do
+    // (BRAND.md forbids body < 16px in preview, 24px on slide scale).
+    baseSize: "16px",
     lineHeight: "1.6",
     letterSpacing: "0",
   },
   layout: {
-    radius: "1rem", // --radius-md
+    // --radius-lg (1.5rem) is the CSS Theme's signature; we sit one step
+    // below (1.25rem) so the embedded terminal doesn't look toy-like
+    // against the generous radius.
+    radius: "1.25rem",
     density: "comfortable",
   },
-  // Pin a few semantic tokens to the CSS-theme equivalents so chart /
-  // badge / destructive reads match the deck palette instead of falling
-  // back to the LENS_0 defaults.
+  // Semantic token overrides. The DS cascade in index.css derives
+  // --color-card from `color-mix(midground 4%, background)` which gives
+  // a near-invisible slate card on a slate canvas. CSS Theme's glass
+  // uses cobalto at ~25% with a sky-400 20% border + 10px backdrop blur
+  // — we rebuild that here and also pin the destructive / success /
+  // warning / border so chart and badge accents match the deck palette.
   colorOverrides: {
+    card: "rgba(30, 58, 138, 0.22)", // --color-cobalto @ 22% (glass base)
+    cardForeground: "#f1f5f9",
+    popover: "rgba(21, 32, 51, 0.85)", // --color-fondo-elev @ 85%
+    primary: "#60a5fa", // --color-cielo (sky-400) → primary accent
+    primaryForeground: "#0f172a",
+    secondary: "rgba(96, 165, 250, 0.12)", // --color-electric-soft
+    muted: "rgba(30, 58, 138, 0.18)",
+    mutedForeground: "#cbd5e1", // --color-tinta2 (slate-300)
+    accent: "rgba(96, 165, 250, 0.18)", // --color-electric-soft
+    accentForeground: "#93c5fd", // --color-cielo2 (sky-300)
+    destructive: "#f87171", // --color-err (red-400)
+    destructiveForeground: "#f1f5f9",
     success: "#34d399", // --color-ok (emerald-400)
     warning: "#fbbf24", // --color-warn (amber-400)
-    destructive: "#f87171", // --color-err (red-400)
+    border: "rgba(96, 165, 250, 0.22)", // sky @ 22% (CSS Theme border)
+    input: "rgba(96, 165, 250, 0.20)",
+    ring: "#60a5fa", // sky-400 → focus ring
   },
-  // Data-series accents for Analytics/Models — input reads as slate-300,
-  // output as electric-blue (sky-500 in the V4 palette, the most
-  // recognizable CSS-theme accent).
+  // Data-series accents — CSS Theme's identity colors. Output bumps from
+  // blue-500 (#3b82f6) to sky-400 (#60a5fa) so the highlight reads as
+  // "the sky" not "the cobalt", matching the deck palette hierarchy.
   seriesColors: {
     inputTokenAccent: "#cbd5e1", // --color-tinta2 (slate-300)
-    outputTokenAccent: "#3b82f6", // --color-electrico (blue-500)
+    outputTokenAccent: "#60a5fa", // --color-cielo (sky-400)
   },
   swatchColors: ["#0f172a", "#3b82f6", "#60a5fa"], // bg / electric / sky
   terminalBackground: "#0c1e4f", // --color-marino (navy canvas)
+  // ──────────────────────────────────────────────────────────────────
+  // COMPONENT STYLES — emit CSS vars consumed by shell components
+  // ──────────────────────────────────────────────────────────────────
+  componentStyles: {
+    card: {
+      // CSS Theme's card-glass: rgba cobalto + backdrop blur + sky
+      // border + tinted shadow. The 10px blur is what gives the
+      // "blueprint" feel even on a solid slate-900 canvas (the blur
+      // collapses to the same color, but the border + shadow + tint
+      // combo is enough to read as a translucent layer).
+      background: "rgba(30, 58, 138, 0.22)",
+      "backdrop-filter": "blur(10px)",
+      "-webkit-backdrop-filter": "blur(10px)",
+      border: "1px solid rgba(96, 165, 250, 0.22)",
+      "box-shadow":
+        "0 1px 3px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25)",
+      "transition": "all 300ms ease-out",
+    },
+    header: {
+      // Backdrop-filter on the header so content scrolls under it and
+      // the breadcrumb / brand mark float on a glass plate. Matches
+      // CSS Theme's chrome philosophy.
+      "backdrop-filter": "blur(10px) saturate(140%)",
+      "-webkit-backdrop-filter": "blur(10px) saturate(140%)",
+      "background": "rgba(15, 23, 42, 0.55)",
+      "border-bottom": "1px solid rgba(96, 165, 250, 0.18)",
+    },
+    sidebar: {
+      background: "rgba(15, 23, 42, 0.65)",
+      "backdrop-filter": "blur(10px) saturate(140%)",
+      "-webkit-backdrop-filter": "blur(10px) saturate(140%)",
+      "border-right": "1px solid rgba(96, 165, 250, 0.18)",
+    },
+    tab: {
+      // Tabs underline active = sky-400 (CSS Theme's accent identity).
+      "border-bottom": "2px solid transparent",
+      "transition": "all 200ms ease-out",
+    },
+    badge: {
+      "font-family": `"JetBrains Mono", ${SYSTEM_MONO}`,
+      "letter-spacing": "0.06em",
+      "text-transform": "uppercase",
+      "font-weight": "600",
+    },
+    page: {
+      "background": "transparent", // let the floating orb show through
+    },
+    backdrop: {
+      // Stronger blueprint grid so the dark canvas never feels empty.
+      "background-image":
+        "linear-gradient(rgba(96, 165, 250, 0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(96, 165, 250, 0.045) 1px, transparent 1px)",
+      "background-size": "32px 32px",
+    },
+  },
+  // ──────────────────────────────────────────────────────────────────
+  // CUSTOM CSS — raw CSS injected as <style> in <head>. This is the
+  // heavy lifter: it builds the structural chrome (accent bar,
+  // breadcrumb, footer, eyebrow bars, pulse-dots, floating orb) that
+  // makes the dashboard READ as Código Sin Siesta rather than as a
+  // generic dark theme. Selectors are scoped to the dashboard shell so
+  // we don't bleed into plugin content.
+  // ──────────────────────────────────────────────────────────────────
+  customCSS: `
+/* ════════════════════════════════════════════════════════════════════
+   Código Sin Siesta — V4 chrome port
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── 0. Inyecta el accent-bar y los orbes como pseudo-elementos del body.
+   Sin tocar componentes: el navegador pinta el chrome a partir del
+   background CSS puro. Queda activo en cada vista del dashboard.
+   !important para pisar cualquier ::before/::after que el backdrop
+   global de @nous-research/ui pueda definir. ── */
+body::before,
+html::before {
+  content: '' !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  height: 4px !important;
+  background: linear-gradient(90deg,
+    #1e3a8a 0%,
+    #3b82f6 35%,
+    #60a5fa 70%,
+    #93c5fd 100%) !important;
+  z-index: 9999 !important;
+  pointer-events: none !important;
+  border: none !important;
+  box-shadow: 0 1px 12px rgba(96, 165, 250, 0.45) !important;
+}
+body::after,
+html::after {
+  content: '' !important;
+  position: fixed !important;
+  top: -180px !important;
+  left: -180px !important;
+  width: 720px !important;
+  height: 720px !important;
+  background: radial-gradient(circle at center,
+    rgba(96, 165, 250, 0.32) 0%,
+    rgba(59, 130, 246, 0.18) 25%,
+    rgba(30, 58, 138, 0.08) 50%,
+    transparent 75%) !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+  border: none !important;
+  animation: csi-float 14s ease-in-out infinite alternate !important;
+  filter: blur(4px) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  body::after, html::after { animation: none !important; }
+}
+
+/* ── Font weight on display so the chrome reads as "space grotesk 800" ── */
+:root { --csi-font-display-weight: 700; }
+
+/* ── 1. Top accent bar — 3px gradient cobalto → eléctrico → cielo ── */
+.csi-accent-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg,
+    #1e3a8a 0%,
+    #3b82f6 50%,
+    #60a5fa 100%);
+  z-index: 9999;
+  pointer-events: none;
+}
+
+/* ── 2. Floating orb — slow radial behind the canvas (9–15s float) ── */
+.csi-float-orb {
+  position: fixed;
+  top: -200px;
+  left: -200px;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle at center,
+    rgba(96, 165, 250, 0.18) 0%,
+    rgba(30, 58, 138, 0.10) 35%,
+    transparent 70%);
+  z-index: 0;
+  pointer-events: none;
+  animation: csi-float 14s ease-in-out infinite alternate;
+  filter: blur(8px);
+}
+.csi-float-orb--br {
+  top: auto;
+  left: auto;
+  bottom: -240px;
+  right: -200px;
+  width: 700px;
+  height: 700px;
+  background: radial-gradient(circle at center,
+    rgba(30, 58, 138, 0.18) 0%,
+    rgba(96, 165, 250, 0.08) 40%,
+    transparent 70%);
+  animation-duration: 18s;
+  animation-delay: -3s;
+}
+@keyframes csi-float {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(40px, -30px) scale(1.08); }
+  100% { transform: translate(-30px, 40px) scale(0.95); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .csi-float-orb { animation: none; }
+}
+
+/* ── 3. Pulse dot — 2s ease-in-out infinite ── */
+.csi-pulse-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow: 0 0 8px #3b82f6, 0 0 14px rgba(96, 165, 250, 0.4);
+  animation: csi-pulse 2s ease-in-out infinite;
+  margin-right: 8px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+@keyframes csi-pulse {
+  0%, 100% { opacity: 1;   transform: scale(1); }
+  50%      { opacity: 0.6; transform: scale(0.85); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .csi-pulse-dot { animation: none; opacity: 0.85; }
+}
+
+/* ── 4. Eyebrow — 24×2px bar + uppercase mono before headings ──
+   Target the dashboard's h2/h3 hierarchy. CSS Theme's chrome.css
+   does this via ::before on .label; we mimic it on the actual h1/h2/h3
+   elements so the heading "RECENT SESSIONS" reads as the deck label. */
+main h2,
+main h3,
+[data-page-header] h1 {
+  position: relative;
+  padding-top: 14px;
+  margin-top: 0.5rem;
+}
+main h2::before,
+main h3::before,
+[data-page-header] h1::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 24px;
+  height: 2px;
+  background: linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%);
+  border-radius: 1px;
+}
+main h2,
+main h3 {
+  font-family: var(--theme-font-display);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.78em;
+  color: #cbd5e1; /* --color-tinta2 */
+  margin-bottom: 0.85em;
+}
+[data-page-header] h1 {
+  font-family: var(--theme-font-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  font-size: 2rem;
+}
+
+/* ── 5. Breadcrumb strip — top mono bar with pulse + org/deck ── */
+.csi-breadcrumb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--theme-font-mono);
+  font-size: 11px;
+  color: #94a3b8; /* --color-tinta3 */
+  letter-spacing: 0.04em;
+  margin-bottom: 1rem;
+}
+.csi-breadcrumb .crumbs { display: flex; align-items: center; gap: 10px; }
+.csi-breadcrumb .org {
+  font-weight: 600;
+  color: #60a5fa; /* --color-cielo */
+}
+.csi-breadcrumb .sep { color: #475569; /* --color-tinta4 */ }
+.csi-breadcrumb .deck { color: #cbd5e1; /* --color-tinta2 */ }
+.csi-breadcrumb .counter {
+  font-variant-numeric: tabular-nums;
+  color: #64748b;
+}
+
+/* ── 6. Footer mono strip — "Hecho con ♥ por Código Sin Siesta" ── */
+.csi-footer {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--theme-font-mono);
+  font-size: 11px;
+  color: #64748b; /* --color-tinta4 */
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(96, 165, 250, 0.10);
+  letter-spacing: 0.04em;
+}
+.csi-footer .heart { color: #3b82f6; /* --color-electrico */ }
+.csi-footer a { color: #60a5fa; text-decoration: none; }
+.csi-footer a:hover { text-decoration: underline; text-decoration-color: rgba(96, 165, 250, 0.4); }
+
+/* ── 7. Card hover lift — CSS Theme card-glass hover state ── */
+.card,
+[data-slot="card"],
+.rounded-xl.border,
+.rounded-lg.border {
+  transition: background 300ms ease-out,
+              border-color 300ms ease-out,
+              box-shadow 300ms ease-out,
+              transform 300ms ease-out !important;
+}
+.card:hover,
+[data-slot="card"]:hover,
+.rounded-xl.border:hover,
+.rounded-lg.border:hover {
+  background: rgba(30, 58, 138, 0.32) !important;
+  border-color: rgba(96, 165, 250, 0.45) !important;
+  box-shadow:
+    0 12px 40px 0 rgba(59, 130, 246, 0.22),
+    inset 0 1px 1px 0 rgba(96, 165, 250, 0.25) !important;
+  transform: translateY(-3px);
+}
+
+/* ── 8. Status pills — sky outline + pulse dot for "connected" ── */
+.csi-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px 3px 8px;
+  font-family: var(--theme-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.10);
+  border: 1px solid rgba(96, 165, 250, 0.32);
+  border-radius: 999px;
+}
+
+/* ── 9. Owl mark — small footer decoration (SVG inline, brand color) ── */
+.csi-owl-mark {
+  width: 18px;
+  height: 18px;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+  color: #60a5fa;
+}
+
+/* ── 10. Selection color — sky tint instead of default blue ── */
+::selection {
+  background: rgba(96, 165, 250, 0.35);
+  color: #f1f5f9;
+}
+
+/* ── 11. Scrollbar — sky tint on the thumb ── */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.4); }
+::-webkit-scrollbar-thumb {
+  background: rgba(96, 165, 250, 0.25);
+  border-radius: 8px;
+  border: 2px solid rgba(15, 23, 42, 0.4);
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(96, 165, 250, 0.45); }
+`,
 };
 
 export const BUILTIN_THEMES: Record<string, DashboardTheme> = {
