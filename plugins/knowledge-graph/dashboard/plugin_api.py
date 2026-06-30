@@ -38,6 +38,7 @@ Supported source kinds (phase 1 only ``obsidian`` is wired in;
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -800,6 +801,97 @@ def get_node(node_id: str) -> Dict[str, Any]:
         raise
     except Exception as exc:
         _log.warning("get_node failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# -----------------------------------------------------------------------------
+# GET /node/{id}/backlinks — Obsidian-style backlinks panel
+# -----------------------------------------------------------------------------
+
+
+@router.get("/node/{node_id:path}/backlinks")
+def get_node_backlinks(
+    node_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> Dict[str, Any]:
+    """Return nodes that *link TO* ``node_id``, joined with the edge
+    that creates the link.
+
+    This is the "what references this" view equivalent to Obsidian's
+    backlinks pane. It returns ``items`` (the source nodes with edge
+    context) and ``total`` for pagination, so large fan-in graphs don't
+    overwhelm the detail panel.
+    """
+
+    try:
+        with _get_conn(_db_path()) as conn:
+            node_row = conn.execute(
+                "SELECT id, title FROM kg_nodes WHERE id=?", (node_id,)
+            ).fetchone()
+            if node_row is None:
+                raise HTTPException(status_code=404, detail="node not found")
+
+            total = conn.execute(
+                "SELECT COUNT(*) FROM kg_edges WHERE target=?", (node_id,)
+            ).fetchone()[0]
+
+            rows = conn.execute(
+                """
+                SELECT
+                    e.id           AS edge_id,
+                    e.kind         AS edge_kind,
+                    e.source_kind  AS source_kind,
+                    n.id           AS source_id,
+                    n.source       AS source_source,
+                    n.kind         AS source_kind_node,
+                    n.title        AS source_title,
+                    n.path         AS source_path,
+                    n.tags         AS source_tags,
+                    n.updated_at   AS source_updated_at
+                FROM kg_edges e
+                JOIN kg_nodes n ON n.id = e.source
+                WHERE e.target = ?
+                ORDER BY n.updated_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (node_id, limit, offset),
+            ).fetchall()
+
+            items: List[Dict[str, Any]] = []
+            for r in rows:
+                items.append(
+                    {
+                        "edge_id": r["edge_id"],
+                        "edge_kind": r["edge_kind"],
+                        "source_kind": r["source_kind"],
+                        "node": {
+                            "id": r["source_id"],
+                            "source": r["source_source"],
+                            "kind": r["source_kind_node"],
+                            "title": r["source_title"],
+                            "path": r["source_path"],
+                            "tags": json.loads(r["source_tags"]) if r["source_tags"] else [],
+                            "updated_at": r["source_updated_at"],
+                            # Frontmatter kept slim here — the detail panel
+                            # opens the full node when the user clicks.
+                            "preview": "",
+                        },
+                    }
+                )
+
+            return {
+                "target_id": node_id,
+                "target_title": node_row["title"],
+                "total": total,
+                "items": items,
+                "limit": limit,
+                "offset": offset,
+            }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.warning("get_node_backlinks failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 

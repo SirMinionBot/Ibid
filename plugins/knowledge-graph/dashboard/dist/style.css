@@ -118,6 +118,88 @@
   border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
 }
 
+/* Tabs inside DetailPanel */
+.hermes-kg-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 12px;
+}
+.hermes-kg-tabs button {
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.hermes-kg-tabs button:hover {
+  background-color: var(--bg-card, rgba(255, 255, 255, 0.06));
+}
+
+/* Lists inside tabs (Outgoing / Backlinks) */
+.hermes-kg-edge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.hermes-kg-edge-list .hermes-kg-edge-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.12s;
+  margin: 0 -6px;
+}
+.hermes-kg-edge-list .hermes-kg-edge-row:hover {
+  background-color: var(--bg-card, rgba(255, 255, 255, 0.06));
+}
+.hermes-kg-edge-list .hermes-kg-edge-row .arrow {
+  color: var(--accent, #60a5fa);
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
+}
+.hermes-kg-edge-list .hermes-kg-edge-row .title {
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hermes-kg-edge-list .hermes-kg-edge-row .kind {
+  color: var(--text-secondary, #94a3b8);
+  font-size: 11px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Backlinks meta header (badge row above title) */
+.hermes-kg-backlink-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.hermes-kg-backlink-meta .kind-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  background-color: var(--bg-card, rgba(255, 255, 255, 0.06));
+  color: var(--text-secondary, #94a3b8);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
+.hermes-kg-backlink-meta .edge-kind {
+  color: var(--text-secondary, #94a3b8);
+  font-size: 10px;
+  margin-left: auto;
+}
+
 /* ---- Graph view (Cytoscape.js) ---- */
 .hermes-kg-graph-wrap {
   position: relative;

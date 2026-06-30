@@ -106,9 +106,25 @@
 
   // ---- Detail panel ----
   function DetailPanel(props) {
-    const { node, onClose, edges } = props;
-    const incoming = edges.filter(function (e) { return e.target === node.id; });
+    const { node, onClose, edges, titleOf, fetchJSON } = props;
     const outgoing = edges.filter(function (e) { return e.source === node.id; });
+
+    // Tabs: overview | outgoing | backlinks
+    const [tab, setTab] = useState("overview");
+    const [backlinks, setBacklinks] = useState({ total: 0, items: [], loading: false, error: null });
+
+    // Lazy-load backlinks when the tab opens
+    useEffect(function () {
+      if (tab !== "backlinks") return;
+      setBacklinks(function (b) { return Object.assign({}, b, { loading: true, error: null }); });
+      fetchJSON("/node/" + encodeURIComponent(node.id) + "/backlinks?limit=100")
+        .then(function (data) {
+          setBacklinks({ total: data.total, items: data.items || [], loading: false, error: null });
+        })
+        .catch(function (err) {
+          setBacklinks({ total: 0, items: [], loading: false, error: (err && err.message) || String(err) });
+        });
+    }, [tab, node.id]);
 
     // Close on Escape
     useEffect(function () {
@@ -116,6 +132,116 @@
       window.addEventListener("keydown", onKey);
       return function () { window.removeEventListener("keydown", onKey); };
     }, [onClose]);
+
+    // Reset to overview when opening a different node
+    useEffect(function () { setTab("overview"); }, [node.id]);
+
+    function TabButton(props) {
+      var active = tab === props.id;
+      return h("button", {
+        onClick: function () { setTab(props.id); },
+        className: cn(
+          "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+          active
+            ? "bg-card text-text-primary border border-border"
+            : "text-text-secondary hover:text-text-primary hover:bg-card/40 border border-transparent"
+        )
+      }, props.label, props.count != null ? h("span", { className: "ml-1.5 text-[10px] text-text-secondary" }, String(props.count)) : null);
+    }
+
+    var overviewTab = h("div", { className: "flex flex-col gap-4" },
+      node.preview ? h("div", null,
+        h("div", { className: "text-xs font-medium mb-2 text-text-primary" }, "Preview"),
+        h("div", { className: "hermes-kg-detail-preview text-sm whitespace-pre-wrap" }, node.preview)
+      ) : null,
+      node.metadata && Object.keys(node.metadata).length > 0 ? h("div", null,
+        h("div", { className: "text-xs font-medium mb-2 text-text-primary" }, "Metadata"),
+        h("div", { className: "flex flex-col gap-1" },
+          Object.keys(node.metadata).map(function (k) {
+            return h("div", { key: k, className: "flex gap-2 text-xs" },
+              h("span", { className: "text-text-secondary min-w-[100px] shrink-0" }, k + ":"),
+              h("span", { className: "text-text-primary break-all" }, String(node.metadata[k]))
+            );
+          })
+        )
+      ) : null,
+      node.tags && node.tags.length > 0 ? h("div", null,
+        h("div", { className: "text-xs font-medium mb-2 text-text-primary" }, "Tags"),
+        h("div", { className: "flex flex-wrap gap-1" },
+          node.tags.map(function (t, i) {
+            return h("span", { key: i, className: "inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-card text-text-secondary border border-border" }, "#" + t);
+          })
+        )
+      ) : null,
+      (!node.preview && !node.metadata && (!node.tags || !node.tags.length)) ? h("div", { className: "text-xs text-text-secondary italic" }, "No metadata, preview, or tags available.") : null
+    );
+
+    var outgoingTab = h("div", null,
+      outgoing.length === 0
+        ? h("div", { className: "text-xs text-text-secondary italic py-4" }, "No outgoing edges from this node.")
+        : h("div", { className: "flex flex-col gap-0.5" },
+          outgoing.map(function (e, i) {
+            var otherId = e.target;
+            var t = titleOf(otherId);
+            return h("div", {
+              key: i,
+              className: "text-xs text-text-secondary cursor-pointer hover:bg-card/40 rounded px-2 py-1 -mx-2 font-mono truncate",
+              title: otherId,
+              onClick: function () {
+                // Open the neighbour (pushes a synthetic node so the panel can re-fetch)
+                fetchJSON("/node/" + encodeURIComponent(otherId))
+                  .then(function (data) {
+                    if (data && data.node) props.onSelectNeighbour && props.onSelectNeighbour(data.node);
+                  })
+                  .catch(function () {});
+              }
+            },
+              h("span", { className: "text-accent mr-1" }, "→"),
+              t ? h("span", { className: "text-text-primary" }, t) : h("span", { className: "italic" }, otherId),
+              h("span", { className: "text-text-secondary ml-1" }, " · " + e.kind)
+            );
+          })
+        )
+    );
+
+    var backlinksContent;
+    if (backlinks.loading) {
+      backlinksContent = h("div", { className: "text-xs text-text-secondary italic py-4" }, "Loading backlinks…");
+    } else if (backlinks.error) {
+      backlinksContent = h("div", { className: "text-xs text-red-400 italic py-4" }, "Error: " + backlinks.error);
+    } else if (backlinks.items.length === 0) {
+      backlinksContent = h("div", { className: "text-xs text-text-secondary italic py-4" }, "No nodes link to this one.");
+    } else {
+      backlinksContent = h("div", { className: "flex flex-col gap-0.5" },
+        backlinks.items.map(function (it, i) {
+          var n = it.node;
+          var t = n.title || n.id;
+          return h("div", {
+            key: i,
+            className: "text-xs cursor-pointer hover:bg-card/40 rounded px-2 py-1 -mx-2",
+            onClick: function () {
+              fetchJSON("/node/" + encodeURIComponent(n.id))
+                .then(function (data) {
+                  if (data && data.node) props.onSelectNeighbour && props.onSelectNeighbour(data.node);
+                })
+                .catch(function () {});
+            }
+          },
+            h("div", { className: "flex items-center gap-2 mb-0.5" },
+              h("span", { className: cn("inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium", sourceColor(n.source)) }, n.source),
+              h("span", { className: "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-card text-text-secondary border border-border" }, n.kind),
+              h("span", { className: "text-text-secondary text-[10px] ml-auto" }, it.edge_kind)
+            ),
+            h("div", { className: "font-mono text-text-primary truncate" }, t)
+          );
+        })
+      );
+    }
+
+    var backlinksTab = h("div", null,
+      backlinksContent,
+      backlinks.total > backlinks.items.length ? h("div", { className: "text-xs text-text-secondary italic mt-2" }, "+ " + (backlinks.total - backlinks.items.length) + " more (pagination ready)") : null
+    );
 
     return h("div", { className: "hermes-kg-detail-overlay", onClick: onClose },
       h("div", { className: "hermes-kg-detail-panel", onClick: function (e) { e.stopPropagation(); } },
@@ -125,42 +251,22 @@
             h("div", { className: "flex gap-2 mt-2 flex-wrap" },
               h("span", { className: cn("inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium", sourceColor(node.source)) }, node.source),
               h("span", { className: "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-card text-text-secondary border border-border" }, node.kind)
-            )
+            ),
+            h("div", { className: "text-[10px] text-text-secondary mt-1 font-mono break-all" }, node.id)
           ),
-          h(Button, { size: "sm", variant: "ghost", onClick: onClose, title: "Close" }, "✕")
+          h(Button, { size: "sm", variant: "ghost", onClick: onClose, title: "Close (Esc)" }, "✕")
         ),
-        h("div", { className: "text-xs text-text-secondary mb-4 font-mono break-all" }, node.id),
-        node.preview ? h("div", { className: "hermes-kg-detail-preview text-sm whitespace-pre-wrap mb-4" }, node.preview) : null,
-        node.metadata && Object.keys(node.metadata).length > 0 ? h("div", { className: "hermes-kg-detail-meta mb-4" },
-          h("div", { className: "text-xs font-medium mb-2 text-text-primary" }, "Metadata"),
-          h("div", { className: "flex flex-col gap-1" },
-            Object.keys(node.metadata).map(function (k) {
-              return h("div", { key: k, className: "flex gap-2 text-xs" },
-                h("span", { className: "text-text-secondary min-w-[100px] shrink-0" }, k + ":"),
-                h("span", { className: "text-text-primary break-all" }, String(node.metadata[k]))
-              );
-            })
-          )
-        ) : null,
-        h("div", { className: "grid grid-cols-2 gap-4" },
-          incoming.length > 0 ? h("div", null,
-            h("div", { className: "text-xs font-medium mb-2 text-text-primary" }, "Incoming (" + incoming.length + ")"),
-            h("div", { className: "flex flex-col gap-1" },
-              incoming.slice(0, 20).map(function (e, i) {
-                return h("div", { key: i, className: "text-xs text-text-secondary font-mono truncate" }, "← " + e.source + " · " + e.kind);
-              }),
-              incoming.length > 20 ? h("div", { className: "text-xs text-text-secondary italic" }, "+ " + (incoming.length - 20) + " more") : null
-            )
-          ) : null,
-          outgoing.length > 0 ? h("div", null,
-            h("div", { className: "text-xs font-medium mb-2 text-text-primary" }, "Outgoing (" + outgoing.length + ")"),
-            h("div", { className: "flex flex-col gap-1" },
-              outgoing.slice(0, 20).map(function (e, i) {
-                return h("div", { key: i, className: "text-xs text-text-secondary font-mono truncate" }, "→ " + e.target + " · " + e.kind);
-              }),
-              outgoing.length > 20 ? h("div", { className: "text-xs text-text-secondary italic" }, "+ " + (outgoing.length - 20) + " more") : null
-            )
-          ) : null
+        // Tab bar
+        h("div", { className: "flex gap-1 mb-4 border-b border-border pb-2" },
+          h(TabButton, { id: "overview", label: "Overview" }),
+          h(TabButton, { id: "outgoing", label: "Outgoing", count: outgoing.length }),
+          h(TabButton, { id: "backlinks", label: "Backlinks", count: backlinks.total })
+        ),
+        // Tab content
+        h("div", null,
+          tab === "overview" ? overviewTab : null,
+          tab === "outgoing" ? outgoingTab : null,
+          tab === "backlinks" ? backlinksTab : null
         )
       )
     );
@@ -304,6 +410,17 @@
       return c;
     }
 
+    // id -> title lookup so the detail panel can show "→ Módulo 2: TypeScript MCP"
+    // instead of "→ obsidian:módulo-2-typescript-mcp". Memoised to avoid
+    // rebuilding the dict on every render.
+    const titleOf = useMemo(function () {
+      const m = {};
+      nodes.forEach(function (n) {
+        if (n && n.id) m[n.id] = n.title || n.id;
+      });
+      return m;
+    }, [nodes]);
+
     function toggleSort(col) {
       if (sortBy === col) {
         setSortDir(sortDir === "asc" ? "desc" : "asc");
@@ -365,7 +482,14 @@
       h(TimelineView, { nodes: sortedNodes, onNodeClick: openNodeDetail }),
 
       // Detail overlay
-      selectedNode ? h(DetailPanel, { node: selectedNode, onClose: function () { setSelectedNode(null); }, edges: edges }) : null
+      selectedNode ? h(DetailPanel, {
+        node: selectedNode,
+        onClose: function () { setSelectedNode(null); },
+        edges: edges,
+        titleOf: titleOf,
+        fetchJSON: SDK.fetchJSON,
+        onSelectNeighbour: function (n) { setSelectedNode(n); }
+      }) : null
     );
 
     // ---- Table view ----
