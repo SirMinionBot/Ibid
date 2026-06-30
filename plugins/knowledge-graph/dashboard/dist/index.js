@@ -16,7 +16,7 @@
 
   const React = SDK.React;
   const h = React.createElement;
-  const { useState, useEffect, useMemo } = SDK.hooks;
+  const { useState, useEffect, useMemo, useRef } = SDK.hooks;
   const { cn, isoTimeAgo } = SDK.utils;
 
   const SDK_components = SDK.components || {};
