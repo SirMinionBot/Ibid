@@ -117,3 +117,112 @@
   border-radius: 8px;
   border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
 }
+
+/* ---- Graph view (Cytoscape.js) ---- */
+.hermes-kg-graph-wrap {
+  position: relative;
+  width: 100%;
+  height: 640px;
+  background: var(--bg-base-100, #0a0a0a);
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  overflow: hidden;
+}
+
+.hermes-kg-graph {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.hermes-kg-graph-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 12px;
+  color: var(--text-secondary, #9ca3af);
+  pointer-events: none;
+  background: var(--bg-base-100, rgba(0, 0, 0, 0.6));
+  padding: 8px 16px;
+  border-radius: 6px;
+}
+
+.hermes-kg-graph-hint {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  font-size: 11px;
+  color: var(--text-secondary, #9ca3af);
+  text-align: center;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--bg-base-100, rgba(0, 0, 0, 0.5)), transparent);
+  padding: 16px 8px 4px;
+}
+
+/* ---- Timeline view ---- */
+.hermes-kg-timeline {
+  display: flex;
+  flex-direction: column;
+}
+
+.hermes-kg-timeline-day {
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
+
+.hermes-kg-timeline-day:last-child {
+  border-bottom: none;
+}
+
+.hermes-kg-timeline-day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-card, rgba(255, 255, 255, 0.03));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.04));
+}
+
+.hermes-kg-timeline-day-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #e5e7eb);
+  font-family: var(--theme-font-display, 'Space Grotesk', system-ui, sans-serif);
+}
+
+.hermes-kg-timeline-day-count {
+  font-size: 11px;
+  color: var(--text-secondary, #9ca3af);
+}
+
+.hermes-kg-timeline-day-events {
+  display: flex;
+  flex-direction: column;
+}
+
+.hermes-kg-timeline-event {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.03));
+  cursor: pointer;
+  transition: background-color 120ms ease;
+  width: 100%;
+  font-family: inherit;
+}
+
+.hermes-kg-timeline-event:hover {
+  background: var(--bg-card-hover, rgba(255, 255, 255, 0.04));
+}
+
+.hermes-kg-timeline-event:last-child {
+  border-bottom: none;
+}

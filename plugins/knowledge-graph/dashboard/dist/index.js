@@ -56,6 +56,46 @@
 
   const API = "/api/plugins/knowledge-graph";
 
+  // ---- Cytoscape loader: tries CDN first, falls back to local vendor ----
+  let _cytoscapePromise = null;
+  function loadCytoscape() {
+    if (typeof window.cytoscape === "function") return Promise.resolve(window.cytoscape);
+    if (_cytoscapePromise) return _cytoscapePromise;
+    _cytoscapePromise = new Promise(function (resolve, reject) {
+      function loadFrom(src) {
+        const s = document.createElement("script");
+        s.src = src;
+        s.async = true;
+        s.onload = function () {
+          if (typeof window.cytoscape === "function") resolve(window.cytoscape);
+          else reject(new Error("cytoscape loaded but window.cytoscape missing"));
+        };
+        s.onerror = function () { reject(new Error("failed to load " + src)); };
+        document.head.appendChild(s);
+      }
+      loadFrom("https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js");
+    }).catch(function (cdnErr) {
+      return new Promise(function (resolve, reject) {
+        function loadFrom(src) {
+          const s = document.createElement("script");
+          s.src = src;
+          s.async = true;
+          s.onload = function () {
+            if (typeof window.cytoscape === "function") resolve(window.cytoscape);
+            else reject(new Error("vendor cytoscape loaded but window.cytoscape missing"));
+          };
+          s.onerror = function () { reject(new Error("failed to load " + src)); };
+          document.head.appendChild(s);
+        }
+        loadFrom("/dashboard-plugins/knowledge-graph/dist/vendor/cytoscape.min.js");
+      });
+    }).catch(function (vendorErr) {
+      _cytoscapePromise = null;
+      throw new Error("cytoscape unavailable from CDN or vendor: " + vendorErr.message);
+    });
+    return _cytoscapePromise;
+  }
+
   // ---- Source badge colour (semantic tokens, opacity >= 0.7) ----
   function sourceColor(src) {
     if (src === "obsidian") return "bg-purple-500/20 text-purple-300 border border-purple-500/30";
@@ -292,8 +332,8 @@
         ),
         h("div", { className: "flex gap-2 items-center" },
           h(Button, { size: "sm", variant: activeView === "table" ? "default" : "outline", onClick: function () { setActiveView("table"); } }, "Table"),
-          h(Button, { size: "sm", variant: activeView === "graph" ? "default" : "outline", onClick: function () { setActiveView("graph"); }, disabled: true, title: "Coming soon" }, "Graph"),
-          h(Button, { size: "sm", variant: activeView === "timeline" ? "default" : "outline", onClick: function () { setActiveView("timeline"); }, disabled: true, title: "Coming soon" }, "Timeline"),
+          h(Button, { size: "sm", variant: activeView === "graph" ? "default" : "outline", onClick: function () { setActiveView("graph"); } }, "Graph"),
+          h(Button, { size: "sm", variant: activeView === "timeline" ? "default" : "outline", onClick: function () { setActiveView("timeline"); } }, "Timeline"),
           h(Button, { size: "sm", variant: "outline", onClick: triggerReindex, disabled: reindexing }, reindexing ? "Reindexing..." : "Reindex")
         )
       ),
@@ -319,8 +359,10 @@
         )
       ),
 
-      // Active view
-      activeView === "table" ? renderTable() : renderGraphPlaceholder(),
+      // ---- Active view ----
+      activeView === "table" ? renderTable() :
+      activeView === "graph" ? h(GraphView, { nodes: sortedNodes, edges: edges, onNodeClick: openNodeDetail }) :
+      h(TimelineView, { nodes: sortedNodes, onNodeClick: openNodeDetail }),
 
       // Detail overlay
       selectedNode ? h(DetailPanel, { node: selectedNode, onClose: function () { setSelectedNode(null); }, edges: edges }) : null
@@ -395,14 +437,286 @@
       );
     }
 
-    function renderGraphPlaceholder() {
+    function renderGraphEmpty() {
       return h(Card, null,
         h(CardContent, { className: "p-8 text-center" },
-          h("div", { className: "text-sm text-text-secondary" }, "Graph view — coming soon (Cytoscape.js)"),
-          h("div", { className: "text-xs text-text-secondary mt-2" }, nodes.length + " nodes would render here")
+          h("div", { className: "text-sm text-text-secondary" }, "No nodes to render in the graph yet.")
         )
       );
     }
+  }
+
+  // ---- GraphView: Cytoscape.js force-directed graph ----
+  function GraphView(props) {
+    const { nodes, edges, onNodeClick } = props;
+    const containerRef = useRef(null);
+    const cyRef = useRef(null);
+    const [status, setStatus] = useState("loading"); // loading | ready | error
+    const [errorMsg, setErrorMsg] = useState("");
+
+    useEffect(function () {
+      let cancelled = false;
+      setStatus("loading");
+      loadCytoscape()
+        .then(function (cytoscape) {
+          if (cancelled || !containerRef.current) return;
+          if (nodes.length === 0) {
+            setStatus("ready");
+            return;
+          }
+          // Build elements — map nodes/edges to cytoscape format
+          const elements = [];
+          nodes.forEach(function (n) {
+            elements.push({
+              group: "nodes",
+              data: {
+                id: n.id,
+                label: (n.title || n.id).slice(0, 40),
+                source: n.source,
+                kind: n.kind,
+              },
+            });
+          });
+          // Only keep edges where both endpoints exist in the loaded nodes
+          const nodeIds = new Set(nodes.map(function (n) { return n.id; }));
+          edges.forEach(function (e, i) {
+            if (nodeIds.has(e.source) && nodeIds.has(e.target)) {
+              elements.push({
+                group: "edges",
+                data: {
+                  id: "e" + i,
+                  source: e.source,
+                  target: e.target,
+                  kind: e.kind,
+                },
+              });
+            }
+          });
+          const cy = cytoscape({
+            container: containerRef.current,
+            elements: elements,
+            style: [
+              {
+                selector: "node",
+                style: {
+                  "background-color": function (ele) {
+                    const src = ele.data("source");
+                    if (src === "obsidian") return "#a855f7";
+                    if (src === "gbrain") return "#3b82f6";
+                    if (src === "hermes") return "#10b981";
+                    return "#64748b";
+                  },
+                  "label": "data(label)",
+                  "color": "#e5e7eb",
+                  "font-size": "10px",
+                  "font-family": "Inter, system-ui, sans-serif",
+                  "text-valign": "bottom",
+                  "text-halign": "center",
+                  "text-margin-y": 4,
+                  "text-wrap": "ellipsis",
+                  "text-max-width": "120px",
+                  "width": function (ele) {
+                    const degree = ele.degree(true);
+                    return Math.max(14, Math.min(48, 14 + Math.log(1 + degree) * 6));
+                  },
+                  "height": function (ele) {
+                    const degree = ele.degree(true);
+                    return Math.max(14, Math.min(48, 14 + Math.log(1 + degree) * 6));
+                  },
+                  "border-width": 1.5,
+                  "border-color": "#0a0a0a",
+                  "text-outline-color": "#0a0a0a",
+                  "text-outline-width": 2,
+                },
+              },
+              {
+                selector: "edge",
+                style: {
+                  "width": 1,
+                  "line-color": "#475569",
+                  "curve-style": "bezier",
+                  "target-arrow-shape": "triangle",
+                  "target-arrow-color": "#475569",
+                  "arrow-scale": 0.8,
+                  "opacity": 0.7,
+                },
+              },
+              {
+                selector: "node:selected",
+                style: {
+                  "border-width": 3,
+                  "border-color": "#60a5fa",
+                  "background-blacken": -0.2,
+                },
+              },
+              {
+                selector: "node.highlighted",
+                style: {
+                  "border-width": 3,
+                  "border-color": "#60a5fa",
+                },
+              },
+              {
+                selector: "edge.highlighted",
+                style: {
+                  "line-color": "#60a5fa",
+                  "target-arrow-color": "#60a5fa",
+                  "opacity": 1,
+                  "width": 2,
+                },
+              },
+              {
+                selector: ".faded",
+                style: { "opacity": 0.15 },
+              },
+            ],
+            layout: {
+              name: "cose",
+              animate: false,
+              nodeRepulsion: function () { return 4500; },
+              idealEdgeLength: function () { return 90; },
+              edgeElasticity: function () { return 50; },
+              gravity: 0.4,
+              numIter: 1500,
+              fit: true,
+              padding: 30,
+            },
+            minZoom: 0.2,
+            maxZoom: 3,
+            wheelSensitivity: 0.2,
+          });
+          cyRef.current = cy;
+
+          // Click a node → open detail panel
+          cy.on("tap", "node", function (evt) {
+            const id = evt.target.id();
+            if (typeof onNodeClick === "function") onNodeClick(id);
+          });
+
+          // Hover highlight: dim neighbours that aren't connected to the hovered node
+          cy.on("mouseover", "node", function (evt) {
+            const node = evt.target;
+            const neighborhood = node.closedNeighborhood();
+            cy.elements().addClass("faded");
+            neighborhood.removeClass("faded");
+            neighborhood.nodes().addClass("highlighted");
+            neighborhood.edges().addClass("highlighted");
+          });
+          cy.on("mouseout", "node", function () {
+            cy.elements().removeClass("faded");
+            cy.elements().removeClass("highlighted");
+          });
+
+          setStatus("ready");
+        })
+        .catch(function (e) {
+          if (!cancelled) {
+            setStatus("error");
+            setErrorMsg(e && e.message ? e.message : String(e));
+          }
+        });
+
+      return function () {
+        cancelled = true;
+        if (cyRef.current) {
+          cyRef.current.destroy();
+          cyRef.current = null;
+        }
+      };
+    }, [nodes, edges, onNodeClick]);
+
+    if (nodes.length === 0) {
+      return h(Card, null,
+        h(CardContent, { className: "p-8 text-center" },
+          h("div", { className: "text-sm text-text-secondary" }, "No nodes to render in the graph yet.")
+        )
+      );
+    }
+    if (status === "error") {
+      return h(Card, null,
+        h(CardContent, { className: "p-8 text-center" },
+          h("div", { className: "text-sm text-destructive mb-2" }, "Failed to load Cytoscape.js"),
+          h("div", { className: "text-xs text-text-secondary" }, errorMsg),
+          h("div", { className: "text-xs text-text-secondary mt-2" }, "Check your network and reload. The vendor bundle is included as a fallback.")
+        )
+      );
+    }
+    return h(Card, null,
+      h(CardContent, { className: "p-2" },
+        h("div", { className: "hermes-kg-graph-wrap" },
+          h("div", { ref: containerRef, className: "hermes-kg-graph" }),
+          status === "loading" ? h("div", { className: "hermes-kg-graph-loading" }, "Loading graph...") : null,
+          h("div", { className: "hermes-kg-graph-hint" },
+            h("span", null, "Scroll to zoom · drag to pan · click a node to open detail · hover to highlight")
+          )
+        )
+      )
+    );
+  }
+
+  // ---- TimelineView: nodes grouped by updated_at date ----
+  function TimelineView(props) {
+    const { nodes, onNodeClick } = props;
+    const groups = useMemo(function () {
+      const buckets = {};
+      nodes.forEach(function (n) {
+        const ts = n.updated_at || n.created_at;
+        if (!ts) return;
+        const day = ts.slice(0, 10); // YYYY-MM-DD
+        if (!buckets[day]) buckets[day] = [];
+        buckets[day].push(n);
+      });
+      const days = Object.keys(buckets).sort().reverse();
+      days.forEach(function (d) {
+        buckets[d].sort(function (a, b) {
+          return (b.updated_at || "").localeCompare(a.updated_at || "");
+        });
+      });
+      return days.map(function (d) { return { day: d, nodes: buckets[d] }; });
+    }, [nodes]);
+
+    if (nodes.length === 0) {
+      return h(Card, null,
+        h(CardContent, { className: "p-8 text-center" },
+          h("div", { className: "text-sm text-text-secondary" }, "No dated nodes to plot on a timeline.")
+        )
+      );
+    }
+
+    function prettyDay(s) {
+      try {
+        const d = new Date(s + "T00:00:00Z");
+        return d.toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+      } catch (e) { return s; }
+    }
+
+    return h(Card, null,
+      h(CardContent, { className: "p-0" },
+        h("div", { className: "hermes-kg-timeline" },
+          groups.map(function (g) {
+            return h("div", { key: g.day, className: "hermes-kg-timeline-day" },
+              h("div", { className: "hermes-kg-timeline-day-head" },
+                h("div", { className: "hermes-kg-timeline-day-label" }, prettyDay(g.day)),
+                h("div", { className: "hermes-kg-timeline-day-count" }, g.nodes.length + (g.nodes.length === 1 ? " event" : " events"))
+              ),
+              h("div", { className: "hermes-kg-timeline-day-events" },
+                g.nodes.map(function (n) {
+                  return h("button", {
+                    key: n.id,
+                    className: "hermes-kg-timeline-event",
+                    onClick: function () { if (typeof onNodeClick === "function") onNodeClick(n.id); },
+                  },
+                    h("span", { className: cn("inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium shrink-0", sourceColor(n.source)) }, n.source),
+                    h("span", { className: "text-sm font-medium text-text-primary truncate" }, n.title || n.id),
+                    h("span", { className: "text-xs text-text-secondary ml-auto whitespace-nowrap" }, (n.updated_at || n.created_at || "").slice(11, 16) + " UTC")
+                  );
+                })
+              )
+            );
+          })
+        )
+      )
+    );
   }
 
   // ---- Register ----
