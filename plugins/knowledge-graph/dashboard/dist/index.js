@@ -182,13 +182,12 @@
         : h("div", { className: "flex flex-col gap-0.5" },
           outgoing.map(function (e, i) {
             var otherId = e.target;
-            var t = titleOf(otherId);
+            var t = titleOf[otherId];
             return h("div", {
               key: i,
               className: "text-xs text-text-secondary cursor-pointer hover:bg-card/40 rounded px-2 py-1 -mx-2 font-mono truncate",
               title: otherId,
               onClick: function () {
-                // Open the neighbour (pushes a synthetic node so the panel can re-fetch)
                 fetchJSON("/node/" + encodeURIComponent(otherId))
                   .then(function (data) {
                     if (data && data.node) props.onSelectNeighbour && props.onSelectNeighbour(data.node);
