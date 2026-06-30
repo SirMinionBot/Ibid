@@ -1,0 +1,14 @@
+{
+  "name": "knowledge-graph",
+  "label": "Knowledge Graph",
+  "description": "Visualize and search your knowledge across Obsidian vaults, gbrain pages, and Hermes skills",
+  "icon": "Network",
+  "version": "0.1.0",
+  "tab": {
+    "path": "/knowledge",
+    "position": "after:kanban"
+  },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}

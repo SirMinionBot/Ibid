@@ -1,0 +1,320 @@
+/*
+ * Hermes Knowledge Graph — dashboard plugin styles.
+ *
+ * All colors reference theme CSS vars so the panel reskins with the
+ * active dashboard theme. No hardcoded palette.
+ *
+ * Prefix: .hermes-kg-
+ */
+
+.hermes-kg {
+  width: 100%;
+  color: var(--text-primary, #e5e7eb);
+}
+
+/* ---- Code/pre reset (theme-immune default) ----
+ * Same trick the kanban plugin uses: reset every <code>/<pre> inside
+ * the plugin container to transparent with !important so themes that
+ * paint global code fills don't leak into our raw-text surfaces.
+ */
+.hermes-kg code,
+.hermes-kg pre {
+  background: transparent !important;
+}
+
+/* ---- Table ---- */
+.hermes-kg-table-wrap {
+  overflow-x: auto;
+  border-radius: 0.5rem;
+}
+
+.hermes-kg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.hermes-kg-table th {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  color: var(--text-secondary, #9ca3af);
+  font-weight: 500;
+  user-select: none;
+  background: var(--bg-base-100, transparent);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.hermes-kg-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  color: var(--text-primary, #e5e7eb);
+  vertical-align: middle;
+}
+
+.hermes-kg-table tbody tr {
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.hermes-kg-table tbody tr:hover {
+  background: var(--bg-card-hover, rgba(255, 255, 255, 0.04));
+}
+
+.hermes-kg-table tbody tr.hermes-kg-row-cursor {
+  background: rgba(96, 165, 250, 0.12);   /* matches --brand owl blue, low opacity */
+  outline: 1px solid rgba(96, 165, 250, 0.5);
+  outline-offset: -1px;
+}
+
+.hermes-kg-table tbody tr.hermes-kg-row-cursor:hover {
+  background: rgba(96, 165, 250, 0.18);
+}
+
+/* ---- Detail overlay + panel ---- */
+.hermes-kg-detail-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.72);
+  z-index: 9999;
+  display: flex;
+  justify-content: flex-end;
+  animation: hermes-kg-fade-in 120ms ease;
+}
+
+@keyframes hermes-kg-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.hermes-kg-detail-panel {
+  width: 480px;
+  max-width: 100%;
+  height: 100%;
+  background: var(--bg-base-100, #0a0a0a);
+  border-left: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  padding: 24px;
+  overflow-y: auto;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+  animation: hermes-kg-slide-in 180ms ease;
+}
+
+@keyframes hermes-kg-slide-in {
+  from { transform: translateX(20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.hermes-kg-detail-preview {
+  background: var(--bg-card, rgba(255, 255, 255, 0.04));
+  padding: 12px;
+  border-radius: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  color: var(--text-primary, #e5e7eb);
+}
+
+.hermes-kg-detail-meta {
+  background: var(--bg-card, rgba(255, 255, 255, 0.04));
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
+
+/* Tabs inside DetailPanel */
+.hermes-kg-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 12px;
+}
+.hermes-kg-tabs button {
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.hermes-kg-tabs button:hover {
+  background-color: var(--bg-card, rgba(255, 255, 255, 0.06));
+}
+
+/* Lists inside tabs (Outgoing / Backlinks) */
+.hermes-kg-edge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.hermes-kg-edge-list .hermes-kg-edge-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.12s;
+  margin: 0 -6px;
+}
+.hermes-kg-edge-list .hermes-kg-edge-row:hover {
+  background-color: var(--bg-card, rgba(255, 255, 255, 0.06));
+}
+.hermes-kg-edge-list .hermes-kg-edge-row .arrow {
+  color: var(--accent, #60a5fa);
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
+}
+.hermes-kg-edge-list .hermes-kg-edge-row .title {
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hermes-kg-edge-list .hermes-kg-edge-row .kind {
+  color: var(--text-secondary, #94a3b8);
+  font-size: 11px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Backlinks meta header (badge row above title) */
+.hermes-kg-backlink-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.hermes-kg-backlink-meta .kind-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  background-color: var(--bg-card, rgba(255, 255, 255, 0.06));
+  color: var(--text-secondary, #94a3b8);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
+.hermes-kg-backlink-meta .edge-kind {
+  color: var(--text-secondary, #94a3b8);
+  font-size: 10px;
+  margin-left: auto;
+}
+
+/* ---- Graph view (Cytoscape.js) ---- */
+.hermes-kg-graph-wrap {
+  position: relative;
+  width: 100%;
+  height: 640px;
+  background: var(--bg-base-100, #0a0a0a);
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  overflow: hidden;
+}
+
+.hermes-kg-graph {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.hermes-kg-graph-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 12px;
+  color: var(--text-secondary, #9ca3af);
+  pointer-events: none;
+  background: var(--bg-base-100, rgba(0, 0, 0, 0.6));
+  padding: 8px 16px;
+  border-radius: 6px;
+}
+
+.hermes-kg-graph-hint {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  font-size: 11px;
+  color: var(--text-secondary, #9ca3af);
+  text-align: center;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--bg-base-100, rgba(0, 0, 0, 0.5)), transparent);
+  padding: 16px 8px 4px;
+}
+
+/* ---- Timeline view ---- */
+.hermes-kg-timeline {
+  display: flex;
+  flex-direction: column;
+}
+
+.hermes-kg-timeline-day {
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
+
+.hermes-kg-timeline-day:last-child {
+  border-bottom: none;
+}
+
+.hermes-kg-timeline-day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-card, rgba(255, 255, 255, 0.03));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.04));
+}
+
+.hermes-kg-timeline-day-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #e5e7eb);
+  font-family: var(--theme-font-display, 'Space Grotesk', system-ui, sans-serif);
+}
+
+.hermes-kg-timeline-day-count {
+  font-size: 11px;
+  color: var(--text-secondary, #9ca3af);
+}
+
+.hermes-kg-timeline-day-events {
+  display: flex;
+  flex-direction: column;
+}
+
+.hermes-kg-timeline-event {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.03));
+  cursor: pointer;
+  transition: background-color 120ms ease;
+  width: 100%;
+  font-family: inherit;
+}
+
+.hermes-kg-timeline-event:hover {
+  background: var(--bg-card-hover, rgba(255, 255, 255, 0.04));
+}
+
+.hermes-kg-timeline-event:last-child {
+  border-bottom: none;
+}

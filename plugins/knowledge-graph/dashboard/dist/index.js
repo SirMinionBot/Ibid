@@ -1,0 +1,964 @@
+/**
+ * Hermes Knowledge Graph — Dashboard Plugin
+ *
+ * Visualize and search your knowledge across Obsidian vaults, gbrain pages,
+ * and Hermes skills. Calls the plugin's backend at /api/plugins/knowledge-graph/
+ * which indexes Obsidian vaults into SQLite on first request.
+ *
+ * Plain IIFE, no build step. Uses window.__HERMES_PLUGIN_SDK__ for React +
+ * shadcn primitives.
+ */
+(function () {
+  "use strict";
+
+  const SDK = window.__HERMES_PLUGIN_SDK__;
+  if (!SDK) return;
+
+  const React = SDK.React;
+  const h = React.createElement;
+  const { useState, useEffect, useMemo, useRef } = SDK.hooks;
+  const { cn, isoTimeAgo } = SDK.utils;
+
+  const SDK_components = SDK.components || {};
+  const Card = SDK_components.Card || function (props) {
+    return h("div", { className: cn("rounded-lg border border-border bg-card", props.className) }, props.children);
+  };
+  const CardContent = SDK_components.CardContent || function (props) {
+    return h("div", { className: cn("p-4", props.className) }, props.children);
+  };
+  const Badge = SDK_components.Badge || function (props) {
+    return h("span", { className: cn("inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-card text-text-primary", props.className) }, props.children);
+  };
+  const Button = SDK_components.Button || function (props) {
+    const variant = props.variant || "default";
+    const base = "inline-flex items-center justify-center rounded-md text-xs font-medium transition-colors px-3 py-1.5 disabled:pointer-events-none disabled:opacity-50";
+    const variants = {
+      default: "bg-brand text-brand-foreground hover:opacity-90",
+      outline: "border border-border bg-transparent hover:bg-card",
+      ghost: "bg-transparent hover:bg-card",
+    };
+    return h("button", Object.assign({
+      type: "button",
+      onClick: props.onClick,
+      disabled: props.disabled,
+      className: cn(base, variants[variant] || variants.default, props.className),
+    }, { title: props.title }), props.children);
+  };
+  const Input = SDK_components.Input || function (props) {
+    return h("input", Object.assign({
+      type: "text",
+      ref: props.ref,
+      value: props.value || "",
+      onChange: props.onChange,
+      placeholder: props.placeholder,
+      className: cn("flex h-9 w-full rounded-md border border-border bg-bg-base-100 px-3 py-1 text-sm placeholder:text-text-secondary focus:outline-none focus:ring-2 focus:ring-brand", props.className),
+    }));
+  };
+
+  const API = "/api/plugins/knowledge-graph";
+
+  // ---- Cytoscape loader: tries CDN first, falls back to local vendor ----
+  let _cytoscapePromise = null;
+  function loadCytoscape() {
+    if (typeof window.cytoscape === "function") return Promise.resolve(window.cytoscape);
+    if (_cytoscapePromise) return _cytoscapePromise;
+    _cytoscapePromise = new Promise(function (resolve, reject) {
+      function loadFrom(src) {
+        const s = document.createElement("script");
+        s.src = src;
+        s.async = true;
+        s.onload = function () {
+          if (typeof window.cytoscape === "function") resolve(window.cytoscape);
+          else reject(new Error("cytoscape loaded but window.cytoscape missing"));
+        };
+        s.onerror = function () { reject(new Error("failed to load " + src)); };
+        document.head.appendChild(s);
+      }
+      loadFrom("https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js");
+    }).catch(function (cdnErr) {
+      return new Promise(function (resolve, reject) {
+        function loadFrom(src) {
+          const s = document.createElement("script");
+          s.src = src;
+          s.async = true;
+          s.onload = function () {
+            if (typeof window.cytoscape === "function") resolve(window.cytoscape);
+            else reject(new Error("vendor cytoscape loaded but window.cytoscape missing"));
+          };
+          s.onerror = function () { reject(new Error("failed to load " + src)); };
+          document.head.appendChild(s);
+        }
+        loadFrom("/dashboard-plugins/knowledge-graph/dist/vendor/cytoscape.min.js");
+      });
+    }).catch(function (vendorErr) {
+      _cytoscapePromise = null;
+      throw new Error("cytoscape unavailable from CDN or vendor: " + vendorErr.message);
+    });
+    return _cytoscapePromise;
+  }
+
+  // ---- Source badge colour (semantic tokens, opacity >= 0.7) ----
+  function sourceColor(src) {
+    if (src === "obsidian") return "bg-purple-500/20 text-purple-300 border border-purple-500/30";
+    if (src === "gbrain") return "bg-blue-500/20 text-blue-300 border border-blue-500/30";
+    if (src === "hermes") return "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
+    return "bg-slate-500/20 text-slate-300 border border-slate-500/30";
+  }
+
+  // ---- Fuzzy scoring ----
+  // Returns 0 if `query` is not a subsequence of `text`; otherwise a score
+  // where higher = better match. Bonuses: +10 prefix match, +6 word-boundary
+  // match, +3 consecutive-run extension. Empty query => 0 (caller short-circuits).
+  function fuzzyScore(query, text) {
+    if (!query) return 0;
+    var qi = 0;
+    var score = 0;
+    var prevMatched = false;
+    for (var i = 0; i < text.length && qi < query.length; i++) {
+      if (text[i] === query[qi]) {
+        score += 1;
+        if (i === qi) score += 10;                // prefix bonus
+        else if (text[i - 1] === " " || text[i - 1] === "-" || text[i - 1] === "_" || text[i - 1] === "/") score += 6; // word-boundary
+        if (prevMatched) score += 3;              // consecutive run
+        prevMatched = true;
+        qi++;
+      } else {
+        prevMatched = false;
+      }
+    }
+    return qi === query.length ? score : 0;
+  }
+
+  // ---- Detail panel ----
+  function DetailPanel(props) {
+    const { node, onClose, edges, titleOf, fetchJSON } = props;
+    const outgoing = edges.filter(function (e) { return e.source === node.id; });
+
+    // Tabs: overview | outgoing | backlinks
+    const [tab, setTab] = useState("overview");
+    const [backlinks, setBacklinks] = useState({ total: 0, items: [], loading: false, error: null });
+
+    // Lazy-load backlinks when the tab opens
+    useEffect(function () {
+      if (tab !== "backlinks") return;
+      setBacklinks(function (b) { return Object.assign({}, b, { loading: true, error: null }); });
+      fetchJSON("/node/" + encodeURIComponent(node.id) + "/backlinks?limit=100")
+        .then(function (data) {
+          setBacklinks({ total: data.total, items: data.items || [], loading: false, error: null });
+        })
+        .catch(function (err) {
+          setBacklinks({ total: 0, items: [], loading: false, error: (err && err.message) || String(err) });
+        });
+    }, [tab, node.id]);
+
+    // Close on Escape
+    useEffect(function () {
+      function onKey(e) { if (e.key === "Escape") onClose(); }
+      window.addEventListener("keydown", onKey);
+      return function () { window.removeEventListener("keydown", onKey); };
+    }, [onClose]);
+
+    // Reset to overview when opening a different node
+    useEffect(function () { setTab("overview"); }, [node.id]);
+
+    function TabButton(props) {
+      var active = tab === props.id;
+      return h("button", {
+        onClick: function () { setTab(props.id); },
+        className: cn(
+          "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+          active
+            ? "bg-card text-text-primary border border-border"
+            : "text-text-secondary hover:text-text-primary hover:bg-card/40 border border-transparent"
+        )
+      }, props.label, props.count != null ? h("span", { className: "ml-1.5 text-[10px] text-text-secondary" }, String(props.count)) : null);
+    }
+
+    var overviewTab = h("div", { className: "flex flex-col gap-4" },
+      node.preview ? h("div", null,
+        h("div", { className: "text-xs font-medium mb-2 text-text-primary" }, "Preview"),
+        h("div", { className: "hermes-kg-detail-preview text-sm whitespace-pre-wrap" }, node.preview)
+      ) : null,
+      node.metadata && Object.keys(node.metadata).length > 0 ? h("div", null,
+        h("div", { className: "text-xs font-medium mb-2 text-text-primary" }, "Metadata"),
+        h("div", { className: "flex flex-col gap-1" },
+          Object.keys(node.metadata).map(function (k) {
+            return h("div", { key: k, className: "flex gap-2 text-xs" },
+              h("span", { className: "text-text-secondary min-w-[100px] shrink-0" }, k + ":"),
+              h("span", { className: "text-text-primary break-all" }, String(node.metadata[k]))
+            );
+          })
+        )
+      ) : null,
+      node.tags && node.tags.length > 0 ? h("div", null,
+        h("div", { className: "text-xs font-medium mb-2 text-text-primary" }, "Tags"),
+        h("div", { className: "flex flex-wrap gap-1" },
+          node.tags.map(function (t, i) {
+            return h("span", { key: i, className: "inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-card text-text-secondary border border-border" }, "#" + t);
+          })
+        )
+      ) : null,
+      (!node.preview && !node.metadata && (!node.tags || !node.tags.length)) ? h("div", { className: "text-xs text-text-secondary italic" }, "No metadata, preview, or tags available.") : null
+    );
+
+    var outgoingTab = h("div", null,
+      outgoing.length === 0
+        ? h("div", { className: "text-xs text-text-secondary italic py-4" }, "No outgoing edges from this node.")
+        : h("div", { className: "flex flex-col gap-0.5" },
+          outgoing.map(function (e, i) {
+            var otherId = e.target;
+            var t = titleOf[otherId];
+            return h("div", {
+              key: i,
+              className: "text-xs text-text-secondary cursor-pointer hover:bg-card/40 rounded px-2 py-1 -mx-2 font-mono truncate",
+              title: otherId,
+              onClick: function () {
+                fetchJSON("/node/" + encodeURIComponent(otherId))
+                  .then(function (data) {
+                    if (data && data.node) props.onSelectNeighbour && props.onSelectNeighbour(data.node);
+                  })
+                  .catch(function () {});
+              }
+            },
+              h("span", { className: "text-accent mr-1" }, "→"),
+              t ? h("span", { className: "text-text-primary" }, t) : h("span", { className: "italic" }, otherId),
+              h("span", { className: "text-text-secondary ml-1" }, " · " + e.kind)
+            );
+          })
+        )
+    );
+
+    var backlinksContent;
+    if (backlinks.loading) {
+      backlinksContent = h("div", { className: "text-xs text-text-secondary italic py-4" }, "Loading backlinks…");
+    } else if (backlinks.error) {
+      backlinksContent = h("div", { className: "text-xs text-red-400 italic py-4" }, "Error: " + backlinks.error);
+    } else if (backlinks.items.length === 0) {
+      backlinksContent = h("div", { className: "text-xs text-text-secondary italic py-4" }, "No nodes link to this one.");
+    } else {
+      backlinksContent = h("div", { className: "flex flex-col gap-0.5" },
+        backlinks.items.map(function (it, i) {
+          var n = it.node;
+          var t = n.title || n.id;
+          return h("div", {
+            key: i,
+            className: "text-xs cursor-pointer hover:bg-card/40 rounded px-2 py-1 -mx-2",
+            onClick: function () {
+              fetchJSON("/node/" + encodeURIComponent(n.id))
+                .then(function (data) {
+                  if (data && data.node) props.onSelectNeighbour && props.onSelectNeighbour(data.node);
+                })
+                .catch(function () {});
+            }
+          },
+            h("div", { className: "flex items-center gap-2 mb-0.5" },
+              h("span", { className: cn("inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium", sourceColor(n.source)) }, n.source),
+              h("span", { className: "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-card text-text-secondary border border-border" }, n.kind),
+              h("span", { className: "text-text-secondary text-[10px] ml-auto" }, it.edge_kind)
+            ),
+            h("div", { className: "font-mono text-text-primary truncate" }, t)
+          );
+        })
+      );
+    }
+
+    var backlinksTab = h("div", null,
+      backlinksContent,
+      backlinks.total > backlinks.items.length ? h("div", { className: "text-xs text-text-secondary italic mt-2" }, "+ " + (backlinks.total - backlinks.items.length) + " more (pagination ready)") : null
+    );
+
+    return h("div", { className: "hermes-kg-detail-overlay", onClick: onClose },
+      h("div", { className: "hermes-kg-detail-panel", onClick: function (e) { e.stopPropagation(); } },
+        h("div", { className: "flex items-start justify-between mb-4 gap-2" },
+          h("div", { className: "flex-1 min-w-0" },
+            h("h2", { className: "text-lg font-semibold truncate" }, node.title || node.id),
+            h("div", { className: "flex gap-2 mt-2 flex-wrap" },
+              h("span", { className: cn("inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium", sourceColor(node.source)) }, node.source),
+              h("span", { className: "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-card text-text-secondary border border-border" }, node.kind)
+            ),
+            h("div", { className: "text-[10px] text-text-secondary mt-1 font-mono break-all" }, node.id)
+          ),
+          h(Button, { size: "sm", variant: "ghost", onClick: onClose, title: "Close (Esc)" }, "✕")
+        ),
+        // Tab bar
+        h("div", { className: "flex gap-1 mb-4 border-b border-border pb-2" },
+          h(TabButton, { id: "overview", label: "Overview" }),
+          h(TabButton, { id: "outgoing", label: "Outgoing", count: outgoing.length }),
+          h(TabButton, { id: "backlinks", label: "Backlinks", count: backlinks.total })
+        ),
+        // Tab content
+        h("div", null,
+          tab === "overview" ? overviewTab : null,
+          tab === "outgoing" ? outgoingTab : null,
+          tab === "backlinks" ? backlinksTab : null
+        )
+      )
+    );
+  }
+
+  // ---- Main page ----
+  function KnowledgeGraphPage() {
+    const [sources, setSources] = useState([]);
+    const [nodes, setNodes] = useState([]);
+    const [edges, setEdges] = useState([]);
+    const [selectedNode, setSelectedNode] = useState(null);
+    const [search, setSearch] = useState("");
+    const [enabledSources, setEnabledSources] = useState(new Set());
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [reindexing, setReindexing] = useState(false);
+    const [activeView, setActiveView] = useState("table");
+    const [sortBy, setSortBy] = useState("updated_at");
+    const [sortDir, setSortDir] = useState("desc");
+    const [cursorIndex, setCursorIndex] = useState(0);   // keyboard cursor in sortedNodes
+    const searchRef = useRef(null);                        // for Ctrl+K focus
+    const tableWrapRef = useRef(null);                     // for arrow-key auto-scroll
+
+    // ---- Load sources on mount ----
+    useEffect(function () {
+      let cancelled = false;
+      SDK.fetchJSON(API + "/sources")
+        .then(function (s) {
+          if (cancelled) return;
+          setSources(s || []);
+          // Pre-enable sources that have a non-zero node_count
+          const enabled = new Set((s || []).filter(function (x) { return x.node_count > 0; }).map(function (x) { return x.id; }));
+          setEnabledSources(enabled);
+        })
+        .catch(function (e) {
+          if (!cancelled) setError(String(e && e.message ? e.message : e));
+        })
+        .finally(function () {
+          if (!cancelled) setLoading(false);
+        });
+      return function () { cancelled = true; };
+    }, []);
+
+    // ---- Load graph whenever enabled sources change ----
+    useEffect(function () {
+      if (enabledSources.size === 0) {
+        setNodes([]);
+        setEdges([]);
+        return;
+      }
+      let cancelled = false;
+      Promise.all(Array.from(enabledSources).map(function (src) {
+        return SDK.fetchJSON(API + "/graph?source=" + encodeURIComponent(src) + "&limit=500").catch(function () { return { nodes: [], edges: [] }; });
+      })).then(function (results) {
+        if (cancelled) return;
+        const allNodes = [];
+        const allEdges = [];
+        results.forEach(function (r) {
+          (r.nodes || []).forEach(function (n) { allNodes.push(n); });
+          (r.edges || []).forEach(function (e) { allEdges.push(e); });
+        });
+        setNodes(allNodes);
+        setEdges(allEdges);
+      });
+      return function () { cancelled = true; };
+    }, [enabledSources]);
+
+    function toggleSource(id) {
+      const next = new Set(enabledSources);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      setEnabledSources(next);
+    }
+
+    // ---- Keyboard shortcuts (global, but ignore when typing in an input) ----
+    // Ctrl/Cmd+K focuses search; ↑/↓ moves cursor; Enter opens; Esc closes panel.
+    // Only active in Table view (Graph/Timeline have their own interaction).
+    useEffect(function () {
+      function onKey(e) {
+        const target = e.target;
+        const inField = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+        // Esc always closes the detail panel (works even from inputs)
+        if (e.key === "Escape" && selectedNode) {
+          e.preventDefault();
+          setSelectedNode(null);
+          return;
+        }
+        if (inField) return;             // don't hijack typing
+        if (activeView !== "table") return;
+        // Ctrl/Cmd+K → focus search
+        if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+          e.preventDefault();
+          if (searchRef.current) {
+            searchRef.current.focus();
+            searchRef.current.select();
+          }
+          return;
+        }
+        // Arrow keys → move cursor
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          if (sortedNodes.length === 0) return;
+          e.preventDefault();
+          setCursorIndex(function (cur) {
+            const next = e.key === "ArrowDown"
+              ? Math.min(cur + 1, sortedNodes.length - 1)
+              : Math.max(cur - 1, 0);
+            return next;
+          });
+          return;
+        }
+        // Enter → open detail
+        if (e.key === "Enter") {
+          if (sortedNodes.length === 0) return;
+          const node = sortedNodes[cursorIndex];
+          if (node) {
+            e.preventDefault();
+            openNodeDetail(node.id);
+          }
+        }
+      }
+      window.addEventListener("keydown", onKey);
+      return function () { window.removeEventListener("keydown", onKey); };
+    }, [activeView, sortedNodes, cursorIndex, selectedNode]);
+
+    // Reset cursor when the filtered/sorted list changes
+    useEffect(function () {
+      setCursorIndex(function (cur) {
+        if (sortedNodes.length === 0) return 0;
+        return Math.min(cur, sortedNodes.length - 1);
+      });
+    }, [sortedNodes.length]);
+
+    // Auto-scroll the cursor row into view (table view only)
+    useEffect(function () {
+      if (activeView !== "table") return;
+      const wrap = tableWrapRef.current;
+      if (!wrap) return;
+      const row = wrap.querySelector('[data-cursor="true"]');
+      if (row && row.scrollIntoView) {
+        row.scrollIntoView({ block: "nearest" });
+      }
+    }, [cursorIndex, activeView]);
+
+    function triggerReindex() {
+      setReindexing(true);
+      SDK.fetchJSON(API + "/reindex", { method: "POST" })
+        .then(function (resp) {
+          // Poll until done
+          return pollJob(resp.job_id);
+        })
+        .then(function () {
+          // Reload sources + graph
+          return SDK.fetchJSON(API + "/sources");
+        })
+        .then(function (s) {
+          setSources(s || []);
+          setEnabledSources(new Set((s || []).filter(function (x) { return x.node_count > 0; }).map(function (x) { return x.id; })));
+        })
+        .catch(function (e) { setError(String(e && e.message ? e.message : e)); })
+        .finally(function () { setReindexing(false); });
+    }
+
+    function pollJob(jobId) {
+      return new Promise(function (resolve, reject) {
+        const tick = function () {
+          SDK.fetchJSON(API + "/reindex/" + encodeURIComponent(jobId))
+            .then(function (s) {
+              if (s.status === "done") return resolve(s);
+              if (s.status === "error") return reject(new Error(s.message || "reindex failed"));
+              setTimeout(tick, 500);
+            })
+            .catch(reject);
+        };
+        tick();
+      });
+    }
+
+    function openNodeDetail(id) {
+      SDK.fetchJSON(API + "/node/" + encodeURIComponent(id))
+        .then(function (resp) { setSelectedNode(resp.node || resp); })
+        .catch(function (e) { setError(String(e && e.message ? e.message : e)); });
+    }
+
+    // ---- Derived: filtered + sorted ----
+    // Fuzzy search: subsequence match with scoring (better matches first).
+    // Scoring bonuses: prefix > word-boundary > consecutive; hits in title
+    // weight 2x vs preview. Empty query returns everything unchanged.
+    const filteredNodes = useMemo(function () {
+      if (!search) return nodes;
+      const q = search.toLowerCase();
+      const scored = [];
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const title = (n.title || "").toLowerCase();
+        const preview = (n.preview || "").toLowerCase();
+        const titleScore = fuzzyScore(q, title);
+        const previewScore = fuzzyScore(q, preview);
+        if (titleScore === 0 && previewScore === 0) continue;
+        scored.push({ node: n, score: titleScore * 2 + previewScore });
+      }
+      scored.sort(function (a, b) { return b.score - a.score; });
+      return scored.map(function (s) { return s.node; });
+    }, [nodes, search]);
+
+    const sortedNodes = useMemo(function () {
+      const arr = filteredNodes.slice();
+      arr.sort(function (a, b) {
+        const av = a[sortBy] || "";
+        const bv = b[sortBy] || "";
+        let cmp;
+        if (av < bv) cmp = -1; else if (av > bv) cmp = 1; else cmp = 0;
+        return sortDir === "asc" ? cmp : -cmp;
+      });
+      return arr;
+    }, [filteredNodes, sortBy, sortDir]);
+
+    function inDegree(id) {
+      let c = 0;
+      for (let i = 0; i < edges.length; i++) if (edges[i].target === id) c++;
+      return c;
+    }
+    function outDegree(id) {
+      let c = 0;
+      for (let i = 0; i < edges.length; i++) if (edges[i].source === id) c++;
+      return c;
+    }
+
+    // id -> title lookup so the detail panel can show "→ Módulo 2: TypeScript MCP"
+    // instead of "→ obsidian:módulo-2-typescript-mcp". Memoised to avoid
+    // rebuilding the dict on every render.
+    const titleOf = useMemo(function () {
+      const m = {};
+      nodes.forEach(function (n) {
+        if (n && n.id) m[n.id] = n.title || n.id;
+      });
+      return m;
+    }, [nodes]);
+
+    function toggleSort(col) {
+      if (sortBy === col) {
+        setSortDir(sortDir === "asc" ? "desc" : "asc");
+      } else {
+        setSortBy(col);
+        setSortDir("desc");
+      }
+    }
+
+    // ---- Render ----
+    if (loading) {
+      return h("div", { className: "p-8 text-sm text-text-secondary" }, "Loading knowledge graph...");
+    }
+    if (error) {
+      return h("div", { className: "p-8" },
+        h("div", { className: "text-sm text-destructive mb-2" }, "Error: " + error),
+        h(Button, { size: "sm", variant: "outline", onClick: function () { setError(null); setLoading(true); window.location.reload(); } }, "Retry")
+      );
+    }
+
+    return h("div", { className: "hermes-kg flex flex-col gap-4 p-4" },
+      h("div", { className: "flex items-center justify-between flex-wrap gap-2" },
+        h("div", null,
+          h("h1", { className: "text-2xl font-semibold text-text-primary" }, "Knowledge Graph"),
+          h("p", { className: "text-xs text-text-secondary mt-1" }, nodes.length + " nodes · " + edges.length + " edges · " + sources.length + " sources")
+        ),
+        h("div", { className: "flex gap-2 items-center" },
+          h(Button, { size: "sm", variant: activeView === "table" ? "default" : "outline", onClick: function () { setActiveView("table"); } }, "Table"),
+          h(Button, { size: "sm", variant: activeView === "graph" ? "default" : "outline", onClick: function () { setActiveView("graph"); } }, "Graph"),
+          h(Button, { size: "sm", variant: activeView === "timeline" ? "default" : "outline", onClick: function () { setActiveView("timeline"); } }, "Timeline"),
+          h(Button, { size: "sm", variant: "outline", onClick: triggerReindex, disabled: reindexing }, reindexing ? "Reindexing..." : "Reindex")
+        )
+      ),
+
+      // Sources + Search
+      h("div", { className: "flex flex-wrap gap-2 items-center" },
+        sources.map(function (s) {
+          const enabled = enabledSources.has(s.id);
+          return h(Button, {
+            key: s.id,
+            size: "sm",
+            variant: enabled ? "default" : "outline",
+            onClick: function () { toggleSource(s.id); },
+            title: (s.last_sync ? "Last sync: " + isoTimeAgo(s.last_sync) : "Never synced") + " · " + (s.node_count || 0) + " nodes",
+          }, s.id + " · " + (s.node_count || 0));
+        }),
+        h("div", { className: "flex-1 min-w-[200px] ml-auto" },
+          h(Input, {
+            ref: searchRef,
+            placeholder: "Search title or preview... (Ctrl+K)",
+            value: search,
+            onChange: function (e) { setSearch(e.target.value); },
+          })
+        )
+      ),
+
+      // ---- Active view ----
+      activeView === "table" ? renderTable() :
+      activeView === "graph" ? h(GraphView, { nodes: sortedNodes, edges: edges, onNodeClick: openNodeDetail }) :
+      h(TimelineView, { nodes: sortedNodes, onNodeClick: openNodeDetail }),
+
+      // Detail overlay
+      selectedNode ? h(DetailPanel, {
+        node: selectedNode,
+        onClose: function () { setSelectedNode(null); },
+        edges: edges,
+        titleOf: titleOf,
+        fetchJSON: SDK.fetchJSON,
+        onSelectNeighbour: function (n) { setSelectedNode(n); }
+      }) : null
+    );
+
+    // ---- Table view ----
+    function renderTable() {
+      if (sortedNodes.length === 0) {
+        return h(Card, null,
+          h(CardContent, { className: "p-8 text-center" },
+            h("div", { className: "text-sm text-text-secondary" }, "No nodes yet."),
+            h("div", { className: "text-xs text-text-secondary mt-2" }, "Click Reindex to scan the Obsidian vault."),
+            h("div", { className: "mt-4" },
+              h(Button, { size: "sm", onClick: triggerReindex, disabled: reindexing }, reindexing ? "Reindexing..." : "Reindex now")
+            )
+          )
+        );
+      }
+      const cols = [
+        { key: "title", label: "Title", sortable: true },
+        { key: "source", label: "Source", sortable: true },
+        { key: "kind", label: "Kind", sortable: true },
+        { key: "updated_at", label: "Updated", sortable: true },
+        { key: "in", label: "In", sortable: false },
+        { key: "out", label: "Out", sortable: false },
+      ];
+      return h(Card, null,
+        h(CardContent, { className: "p-0" },
+          h("div", { className: "hermes-kg-table-wrap", ref: tableWrapRef },
+            h("table", { className: "hermes-kg-table" },
+              h("thead", null,
+                h("tr", null,
+                  cols.map(function (col) {
+                    const isActive = sortBy === col.key;
+                    return h("th", {
+                      key: col.key,
+                      onClick: col.sortable ? function () { toggleSort(col.key); } : undefined,
+                      className: cn(col.sortable && "cursor-pointer hover:text-text-primary", isActive && "text-text-primary"),
+                    }, col.label + (isActive ? (sortDir === "asc" ? " ↑" : " ↓") : ""));
+                  })
+                )
+              ),
+              h("tbody", null,
+                sortedNodes.map(function (n, idx) {
+                  const isCursor = idx === cursorIndex;
+                  return h("tr", {
+                    key: n.id,
+                    "data-cursor": isCursor ? "true" : "false",
+                    onClick: function () {
+                      setCursorIndex(idx);
+                      openNodeDetail(n.id);
+                    },
+                    className: isCursor ? "hermes-kg-row-cursor" : undefined,
+                  },
+                    h("td", null,
+                      h("div", { className: "flex flex-col gap-0.5" },
+                        h("span", { className: "text-sm font-medium text-text-primary truncate max-w-md" }, n.title || n.id),
+                        n.preview ? h("span", { className: "text-xs text-text-secondary truncate max-w-md" }, (n.preview || "").slice(0, 100)) : null
+                      )
+                    ),
+                    h("td", null,
+                      h("span", { className: cn("inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium", sourceColor(n.source)) }, n.source)
+                    ),
+                    h("td", null,
+                      h("span", { className: "text-xs text-text-secondary" }, n.kind)
+                    ),
+                    h("td", { className: "text-xs text-text-secondary whitespace-nowrap" },
+                      n.updated_at ? isoTimeAgo(n.updated_at) : "—"
+                    ),
+                    h("td", { className: "text-xs text-text-secondary text-center" }, String(inDegree(n.id))),
+                    h("td", { className: "text-xs text-text-secondary text-center" }, String(outDegree(n.id)))
+                  );
+                })
+              )
+            )
+          )
+        )
+      );
+    }
+
+    function renderGraphEmpty() {
+      return h(Card, null,
+        h(CardContent, { className: "p-8 text-center" },
+          h("div", { className: "text-sm text-text-secondary" }, "No nodes to render in the graph yet.")
+        )
+      );
+    }
+  }
+
+  // ---- GraphView: Cytoscape.js force-directed graph ----
+  function GraphView(props) {
+    const { nodes, edges, onNodeClick } = props;
+    const containerRef = useRef(null);
+    const cyRef = useRef(null);
+    const [status, setStatus] = useState("loading"); // loading | ready | error
+    const [errorMsg, setErrorMsg] = useState("");
+
+    useEffect(function () {
+      let cancelled = false;
+      setStatus("loading");
+      loadCytoscape()
+        .then(function (cytoscape) {
+          if (cancelled || !containerRef.current) return;
+          if (nodes.length === 0) {
+            setStatus("ready");
+            return;
+          }
+          // Build elements — map nodes/edges to cytoscape format
+          const elements = [];
+          nodes.forEach(function (n) {
+            elements.push({
+              group: "nodes",
+              data: {
+                id: n.id,
+                label: (n.title || n.id).slice(0, 40),
+                source: n.source,
+                kind: n.kind,
+              },
+            });
+          });
+          // Only keep edges where both endpoints exist in the loaded nodes
+          const nodeIds = new Set(nodes.map(function (n) { return n.id; }));
+          edges.forEach(function (e, i) {
+            if (nodeIds.has(e.source) && nodeIds.has(e.target)) {
+              elements.push({
+                group: "edges",
+                data: {
+                  id: "e" + i,
+                  source: e.source,
+                  target: e.target,
+                  kind: e.kind,
+                },
+              });
+            }
+          });
+          const cy = cytoscape({
+            container: containerRef.current,
+            elements: elements,
+            style: [
+              {
+                selector: "node",
+                style: {
+                  "background-color": function (ele) {
+                    const src = ele.data("source");
+                    if (src === "obsidian") return "#a855f7";
+                    if (src === "gbrain") return "#3b82f6";
+                    if (src === "hermes") return "#10b981";
+                    return "#64748b";
+                  },
+                  "label": "data(label)",
+                  "color": "#e5e7eb",
+                  "font-size": "10px",
+                  "font-family": "Inter, system-ui, sans-serif",
+                  "text-valign": "bottom",
+                  "text-halign": "center",
+                  "text-margin-y": 4,
+                  "text-wrap": "ellipsis",
+                  "text-max-width": "120px",
+                  "width": function (ele) {
+                    const degree = ele.degree(true);
+                    return Math.max(14, Math.min(48, 14 + Math.log(1 + degree) * 6));
+                  },
+                  "height": function (ele) {
+                    const degree = ele.degree(true);
+                    return Math.max(14, Math.min(48, 14 + Math.log(1 + degree) * 6));
+                  },
+                  "border-width": 1.5,
+                  "border-color": "#0a0a0a",
+                  "text-outline-color": "#0a0a0a",
+                  "text-outline-width": 2,
+                },
+              },
+              {
+                selector: "edge",
+                style: {
+                  "width": 1,
+                  "line-color": "#475569",
+                  "curve-style": "bezier",
+                  "target-arrow-shape": "triangle",
+                  "target-arrow-color": "#475569",
+                  "arrow-scale": 0.8,
+                  "opacity": 0.7,
+                },
+              },
+              {
+                selector: "node:selected",
+                style: {
+                  "border-width": 3,
+                  "border-color": "#60a5fa",
+                  "background-blacken": -0.2,
+                },
+              },
+              {
+                selector: "node.highlighted",
+                style: {
+                  "border-width": 3,
+                  "border-color": "#60a5fa",
+                },
+              },
+              {
+                selector: "edge.highlighted",
+                style: {
+                  "line-color": "#60a5fa",
+                  "target-arrow-color": "#60a5fa",
+                  "opacity": 1,
+                  "width": 2,
+                },
+              },
+              {
+                selector: ".faded",
+                style: { "opacity": 0.15 },
+              },
+            ],
+            layout: {
+              name: "cose",
+              animate: false,
+              nodeRepulsion: function () { return 4500; },
+              idealEdgeLength: function () { return 90; },
+              edgeElasticity: function () { return 50; },
+              gravity: 0.4,
+              numIter: 1500,
+              fit: true,
+              padding: 30,
+            },
+            minZoom: 0.2,
+            maxZoom: 3,
+            wheelSensitivity: 0.2,
+          });
+          cyRef.current = cy;
+
+          // Click a node → open detail panel
+          cy.on("tap", "node", function (evt) {
+            const id = evt.target.id();
+            if (typeof onNodeClick === "function") onNodeClick(id);
+          });
+
+          // Hover highlight: dim neighbours that aren't connected to the hovered node
+          cy.on("mouseover", "node", function (evt) {
+            const node = evt.target;
+            const neighborhood = node.closedNeighborhood();
+            cy.elements().addClass("faded");
+            neighborhood.removeClass("faded");
+            neighborhood.nodes().addClass("highlighted");
+            neighborhood.edges().addClass("highlighted");
+          });
+          cy.on("mouseout", "node", function () {
+            cy.elements().removeClass("faded");
+            cy.elements().removeClass("highlighted");
+          });
+
+          setStatus("ready");
+        })
+        .catch(function (e) {
+          if (!cancelled) {
+            setStatus("error");
+            setErrorMsg(e && e.message ? e.message : String(e));
+          }
+        });
+
+      return function () {
+        cancelled = true;
+        if (cyRef.current) {
+          cyRef.current.destroy();
+          cyRef.current = null;
+        }
+      };
+    }, [nodes, edges, onNodeClick]);
+
+    if (nodes.length === 0) {
+      return h(Card, null,
+        h(CardContent, { className: "p-8 text-center" },
+          h("div", { className: "text-sm text-text-secondary" }, "No nodes to render in the graph yet.")
+        )
+      );
+    }
+    if (status === "error") {
+      return h(Card, null,
+        h(CardContent, { className: "p-8 text-center" },
+          h("div", { className: "text-sm text-destructive mb-2" }, "Failed to load Cytoscape.js"),
+          h("div", { className: "text-xs text-text-secondary" }, errorMsg),
+          h("div", { className: "text-xs text-text-secondary mt-2" }, "Check your network and reload. The vendor bundle is included as a fallback.")
+        )
+      );
+    }
+    return h(Card, null,
+      h(CardContent, { className: "p-2" },
+        h("div", { className: "hermes-kg-graph-wrap" },
+          h("div", { ref: containerRef, className: "hermes-kg-graph" }),
+          status === "loading" ? h("div", { className: "hermes-kg-graph-loading" }, "Loading graph...") : null,
+          h("div", { className: "hermes-kg-graph-hint" },
+            h("span", null, "Scroll to zoom · drag to pan · click a node to open detail · hover to highlight")
+          )
+        )
+      )
+    );
+  }
+
+  // ---- TimelineView: nodes grouped by updated_at date ----
+  function TimelineView(props) {
+    const { nodes, onNodeClick } = props;
+    const groups = useMemo(function () {
+      const buckets = {};
+      nodes.forEach(function (n) {
+        const ts = n.updated_at || n.created_at;
+        if (!ts) return;
+        const day = ts.slice(0, 10); // YYYY-MM-DD
+        if (!buckets[day]) buckets[day] = [];
+        buckets[day].push(n);
+      });
+      const days = Object.keys(buckets).sort().reverse();
+      days.forEach(function (d) {
+        buckets[d].sort(function (a, b) {
+          return (b.updated_at || "").localeCompare(a.updated_at || "");
+        });
+      });
+      return days.map(function (d) { return { day: d, nodes: buckets[d] }; });
+    }, [nodes]);
+
+    if (nodes.length === 0) {
+      return h(Card, null,
+        h(CardContent, { className: "p-8 text-center" },
+          h("div", { className: "text-sm text-text-secondary" }, "No dated nodes to plot on a timeline.")
+        )
+      );
+    }
+
+    function prettyDay(s) {
+      try {
+        const d = new Date(s + "T00:00:00Z");
+        return d.toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+      } catch (e) { return s; }
+    }
+
+    return h(Card, null,
+      h(CardContent, { className: "p-0" },
+        h("div", { className: "hermes-kg-timeline" },
+          groups.map(function (g) {
+            return h("div", { key: g.day, className: "hermes-kg-timeline-day" },
+              h("div", { className: "hermes-kg-timeline-day-head" },
+                h("div", { className: "hermes-kg-timeline-day-label" }, prettyDay(g.day)),
+                h("div", { className: "hermes-kg-timeline-day-count" }, g.nodes.length + (g.nodes.length === 1 ? " event" : " events"))
+              ),
+              h("div", { className: "hermes-kg-timeline-day-events" },
+                g.nodes.map(function (n) {
+                  return h("button", {
+                    key: n.id,
+                    className: "hermes-kg-timeline-event",
+                    onClick: function () { if (typeof onNodeClick === "function") onNodeClick(n.id); },
+                  },
+                    h("span", { className: cn("inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium shrink-0", sourceColor(n.source)) }, n.source),
+                    h("span", { className: "text-sm font-medium text-text-primary truncate" }, n.title || n.id),
+                    h("span", { className: "text-xs text-text-secondary ml-auto whitespace-nowrap" }, (n.updated_at || n.created_at || "").slice(11, 16) + " UTC")
+                  );
+                })
+              )
+            );
+          })
+        )
+      )
+    );
+  }
+
+  // ---- Register ----
+  if (window.__HERMES_PLUGINS__ && typeof window.__HERMES_PLUGINS__.register === "function") {
+    window.__HERMES_PLUGINS__.register("knowledge-graph", KnowledgeGraphPage);
+  }
+})();
